@@ -4,10 +4,13 @@ import { withSupabase } from "@supabase/server";
 import { calculateAcSettings, type RoomSize } from "../_shared/acCalculation.ts";
 
 // TODO: ML JSON shape may change occupancy_readings columns.
-// TODO: weather is not factored in yet — pending criteria from the science team.
 const DEFAULT_ROOM_SIZE: RoomSize = "medium";
 
 const DEFAULT_AC_SEER = 4.5;
+// Matches acCalculation.ts's WEATHER_BASELINE_TEMP_C / WEATHER_BASELINE_HUMIDITY_PCT —
+// used when no weather reading has been fetched yet (weather multiplier = 1).
+const DEFAULT_OUTSIDE_TEMP_C = 33;
+const DEFAULT_HUMIDITY_PCT = 60;
 
 interface RoomConfigRow {
   room_size: RoomSize;
@@ -19,14 +22,28 @@ interface OccupancyReadingRow {
   people_count: number;
 }
 
+interface WeatherReadingRow {
+  id: string;
+  temp_c: number;
+  humidity_pct: number;
+  condition_icon_url: string | null;
+}
+
+function weatherLabel(tempC: number): "hot" | "warm" | "cool" {
+  if (tempC >= 33) return "hot";
+  if (tempC >= 25) return "warm";
+  return "cool";
+}
+
 export default {
   fetch: withSupabase({ auth: ["publishable", "secret"] }, async (_req, ctx) => {
     // deno-lint-ignore no-explicit-any
     const db = ctx.supabaseAdmin as any;
 
-    const [{ data: roomConfig }, { data: reading }]: [
+    const [{ data: roomConfig }, { data: reading }, { data: weatherReading }]: [
       { data: RoomConfigRow | null },
       { data: OccupancyReadingRow | null },
+      { data: WeatherReadingRow | null },
     ] = await Promise.all([
       db.from("room_config").select("room_size, ac_seer").eq("id", 1).maybeSingle(),
       db
@@ -35,19 +52,31 @@ export default {
         .order("captured_at", { ascending: false })
         .limit(1)
         .maybeSingle(),
+      db
+        .from("weather_readings")
+        .select("id, temp_c, humidity_pct, condition_icon_url")
+        .order("fetched_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
     ]);
 
     const roomSize = (roomConfig?.room_size as RoomSize) ?? DEFAULT_ROOM_SIZE;
     const peopleCount = reading?.people_count ?? 0;
     const acSeer = roomConfig?.ac_seer ?? DEFAULT_AC_SEER;
+    const outsideTempC = weatherReading?.temp_c ?? DEFAULT_OUTSIDE_TEMP_C;
+    const humidityPct = weatherReading?.humidity_pct ?? DEFAULT_HUMIDITY_PCT;
 
-    const settings = calculateAcSettings(peopleCount, roomSize, acSeer);
+    const settings = calculateAcSettings(peopleCount, roomSize, acSeer, outsideTempC, humidityPct);
 
     const { data: calculation, error } = await db
       .from("ac_calculations")
       .insert({
         occupancy_reading_id: reading?.id ?? null,
-        weather: "warm", // placeholder — not used in calculateAcSettings yet
+        weather_reading_id: weatherReading?.id ?? null,
+        weather: weatherLabel(outsideTempC),
+        outside_temp_c: outsideTempC,
+        humidity_pct: humidityPct,
+        weather_condition_icon_url: weatherReading?.condition_icon_url ?? null,
         ac_mode: settings.mode,
         temperature_c: settings.temperature_c,
         fan_speed: settings.fan_speed,

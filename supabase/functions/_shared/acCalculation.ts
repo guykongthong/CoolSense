@@ -67,6 +67,26 @@ const BTU_PER_EXTRA_PERSON_PER_HR = 225;
 // identical to the original kW table.
 const STANDARD_SEER = 4.5;
 
+// Outdoor conditions BASE_BTU_PER_HR implicitly assumes — a typical Thailand
+// peak design day. Hotter/more humid conditions than this raise the heat
+// gain the AC has to fight (through the envelope, infiltration, and latent
+// load from moisture), so required capacity scales up from here; milder
+// conditions scale it down. Omitting weather args uses this baseline, so the
+// multiplier is 1 and behavior is unchanged from before weather was wired in.
+const WEATHER_BASELINE_TEMP_C = 33;
+const WEATHER_BASELINE_HUMIDITY_PCT = 60;
+
+// Rule-of-thumb load sensitivity: +2% required BTU/hr per °C above the
+// baseline outdoor temp (sensible heat gain scales with outdoor-indoor ΔT),
+// +0.3% per %RH above baseline humidity (latent load from moister air).
+// Tune once the science team has real figures.
+const TEMP_LOAD_FACTOR_PER_C = 0.02;
+const HUMIDITY_LOAD_FACTOR_PER_PCT = 0.003;
+
+// Floor so an unusually mild/dry day can't be modeled as needing negative
+// cooling capacity.
+const MIN_WEATHER_MULTIPLIER = 0.5;
+
 function getOccupancyDensity(peopleCount: number, roomSize: RoomSize): number {
   return peopleCount / ROOM_SIZE_SQM[roomSize];
 }
@@ -78,21 +98,33 @@ export function getAcMode(peopleCount: number, roomSize: RoomSize): AcMode {
   return "eco";
 }
 
+function getWeatherMultiplier(outsideTempC: number, humidityPct: number): number {
+  const raw = 1 +
+    TEMP_LOAD_FACTOR_PER_C * (outsideTempC - WEATHER_BASELINE_TEMP_C) +
+    HUMIDITY_LOAD_FACTOR_PER_PCT * (humidityPct - WEATHER_BASELINE_HUMIDITY_PCT);
+  return Math.max(MIN_WEATHER_MULTIPLIER, raw);
+}
+
 export function calculateAcSettings(
   peopleCount: number,
   roomSize: RoomSize,
   seer: number = STANDARD_SEER,
+  outsideTempC: number = WEATHER_BASELINE_TEMP_C,
+  humidityPct: number = WEATHER_BASELINE_HUMIDITY_PCT,
 ): AcSettings {
   const mode = getAcMode(peopleCount, roomSize);
   const { temperature_c, fan_speed } = MODE_TEMP_FAN[mode];
   const baseBtu = BASE_BTU_PER_HR[mode] * ROOM_SIZE_BTU_MULTIPLIER[roomSize];
 
-  let btu_per_hr = baseBtu;
+  let requiredBtu = baseBtu;
   if (mode === "full") {
     const fullThresholdPeople = FULL_DENSITY * ROOM_SIZE_SQM[roomSize];
     const extraPeople = peopleCount - fullThresholdPeople;
-    btu_per_hr = baseBtu + extraPeople * BTU_PER_EXTRA_PERSON_PER_HR;
+    requiredBtu = baseBtu + extraPeople * BTU_PER_EXTRA_PERSON_PER_HR;
   }
+
+  const weatherMultiplier = getWeatherMultiplier(outsideTempC, humidityPct);
+  const btu_per_hr = requiredBtu * weatherMultiplier;
 
   // The defining physics relationship between cooling capacity and
   // electrical draw: power (kW) = required BTU/hr ÷ (SEER × 1000).

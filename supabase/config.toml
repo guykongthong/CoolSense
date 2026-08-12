@@ -447,6 +447,12 @@ verify_jwt = false
 import_map = "./functions/occupancy-readings/deno.json"
 entrypoint = "./functions/occupancy-readings/index.ts"
 
+[functions.weather]
+enabled = true
+verify_jwt = false
+import_map = "./functions/weather/deno.json"
+entrypoint = "./functions/weather/index.ts"
+
 [functions.simulation]
 enabled = true
 verify_jwt = false
