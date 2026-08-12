@@ -8,13 +8,26 @@ export interface AcSettings {
   power_kw: number;
 }
 
-// Base settings per mode. Fixed for now — weather adjustments will be layered
-// in once the science team defines the criteria for that.
+// Reference m² boundaries for public spaces (libraries, cafes, restaurants) —
+// used to help an admin pick a room_size, not stored/enforced in the schema.
+export const ROOM_SIZE_SQM_RANGES: Record<RoomSize, string> = {
+  small: "50-150 m²",
+  medium: "150-400 m²",
+  large: "400+ m²",
+};
+
+// Base temp/fan per mode, and base power per mode before the room-size
+// multiplier is applied. Weather adjustments will be layered in once the
+// science team defines the criteria for that.
 const MODE_SETTINGS: Record<AcMode, Omit<AcSettings, "mode">> = {
   eco: { temperature_c: 28, fan_speed: 1, power_kw: 0.5 },
   moderate: { temperature_c: 24, fan_speed: 2, power_kw: 2.5 },
   full: { temperature_c: 21, fan_speed: 3, power_kw: 4.5 },
 };
+
+// A bigger room has more air volume to cool, so the same mode draws more
+// power in a large room than a small one. medium is the 1.0 baseline.
+const ROOM_SIZE_POWER_MULTIPLIER: Record<RoomSize, number> = { small: 0.7, medium: 1.0, large: 1.5 };
 
 // People-count threshold (inclusive lower bound) at which mode escalates,
 // per room size — bigger rooms tolerate more people before stepping up.
@@ -22,8 +35,9 @@ const MODERATE_THRESHOLD: Record<RoomSize, number> = { small: 1, medium: 1, larg
 const FULL_THRESHOLD: Record<RoomSize, number> = { small: 3, medium: 4, large: 5 };
 
 // Once in "full" mode, more heat load (more people) means the AC needs more
-// cooling capacity to hold the same setpoint — power scales, temperature/fan
-// stay fixed. Tune this once real numbers are available.
+// cooling capacity to hold the same setpoint — power scales further on top
+// of the room-size multiplier, temperature/fan stay fixed. Tune this once
+// real numbers are available.
 const POWER_PER_EXTRA_PERSON_KW = 0.05;
 
 export function getAcMode(peopleCount: number, roomSize: RoomSize): AcMode {
@@ -35,13 +49,14 @@ export function getAcMode(peopleCount: number, roomSize: RoomSize): AcMode {
 export function calculateAcSettings(peopleCount: number, roomSize: RoomSize): AcSettings {
   const mode = getAcMode(peopleCount, roomSize);
   const base = MODE_SETTINGS[mode];
+  const basePower = base.power_kw * ROOM_SIZE_POWER_MULTIPLIER[roomSize];
 
   if (mode !== "full") {
-    return { mode, ...base };
+    return { mode, temperature_c: base.temperature_c, fan_speed: base.fan_speed, power_kw: basePower };
   }
 
   const extraPeople = peopleCount - FULL_THRESHOLD[roomSize];
-  const power_kw = base.power_kw + extraPeople * POWER_PER_EXTRA_PERSON_KW;
+  const power_kw = basePower + extraPeople * POWER_PER_EXTRA_PERSON_KW;
 
   return { mode, temperature_c: base.temperature_c, fan_speed: base.fan_speed, power_kw };
 }
