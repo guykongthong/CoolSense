@@ -52,6 +52,7 @@ export default {
         temperature_c: settings.temperature_c,
         fan_speed: settings.fan_speed,
         power_kw: settings.power_kw,
+        btu_per_hr: settings.btu_per_hr,
       })
       .select()
       .maybeSingle();

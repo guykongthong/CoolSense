@@ -3,6 +3,7 @@ import { calculateAcSettings, getAcMode } from "./acCalculation.ts";
 
 // Room m² midpoints used for density: small=100, medium=275, large=450.
 // Density thresholds: moderate >= 0.05 people/m², full >= 0.15 people/m².
+// power_kw = btu_per_hr / (seer * 1000); default seer is the standard 4.5.
 
 Deno.test("small room thresholds (100 m²)", () => {
   assertEquals(getAcMode(4, "small"), "eco"); // 0.04
@@ -31,44 +32,52 @@ Deno.test("calculateAcSettings returns base settings for eco/moderate", () => {
     temperature_c: 28,
     fan_speed: 1,
     power_kw: 0.5,
+    btu_per_hr: 2250,
   });
   assertEquals(calculateAcSettings(14, "medium"), {
     mode: "moderate",
     temperature_c: 24,
     fan_speed: 2,
     power_kw: 2.5,
+    btu_per_hr: 11250,
   });
 });
 
-Deno.test("calculateAcSettings applies the room-size power multiplier", () => {
-  assertEquals(calculateAcSettings(0, "small").power_kw, 0.35); // 0.5 * 0.7
-  assertEquals(calculateAcSettings(0, "medium").power_kw, 0.5); // 0.5 * 1.0
-  assertEquals(calculateAcSettings(0, "large").power_kw, 0.75); // 0.5 * 1.5
+Deno.test("calculateAcSettings applies the room-size multiplier to BTU and power", () => {
+  assertEquals(calculateAcSettings(0, "small").power_kw, 0.35); // 2250 * 0.7 / 4500
+  assertEquals(calculateAcSettings(0, "small").btu_per_hr, 1575);
+  assertEquals(calculateAcSettings(0, "medium").power_kw, 0.5);
+  assertEquals(calculateAcSettings(0, "medium").btu_per_hr, 2250);
+  assertEquals(calculateAcSettings(0, "large").power_kw, 0.75); // 2250 * 1.5 / 4500
+  assertEquals(calculateAcSettings(0, "large").btu_per_hr, 3375);
 });
 
-Deno.test("calculateAcSettings holds temp/fan but scales power in full mode", () => {
-  // small room: full density threshold is 15 people (0.15 * 100), base power = 4.5 * 0.7 = 3.15
+Deno.test("calculateAcSettings holds temp/fan but scales power+BTU in full mode", () => {
+  // small room: full density threshold is 15 people (0.15 * 100), base BTU = 20250 * 0.7 = 14175
   assertEquals(calculateAcSettings(15, "small"), {
     mode: "full",
     temperature_c: 21,
     fan_speed: 3,
     power_kw: 3.15,
+    btu_per_hr: 14175,
   });
   assertEquals(calculateAcSettings(20, "small"), {
     mode: "full",
     temperature_c: 21,
     fan_speed: 3,
-    power_kw: 3.4, // 3.15 + (20 - 15) * 0.05
+    power_kw: 3.4, // (14175 + (20 - 15) * 225) / 4500
+    btu_per_hr: 15300,
   });
 });
 
-Deno.test("calculateAcSettings scales power for library-sized crowds", () => {
-  // large room: full density threshold is 67.5 people (0.15 * 450), base power = 4.5 * 1.5 = 6.75
+Deno.test("calculateAcSettings scales power+BTU for library-sized crowds", () => {
+  // large room: full density threshold is 67.5 people (0.15 * 450), base BTU = 20250 * 1.5 = 30375
   assertEquals(calculateAcSettings(100, "large"), {
     mode: "full",
     temperature_c: 21,
     fan_speed: 3,
-    power_kw: 8.375, // 6.75 + (100 - 67.5) * 0.05
+    power_kw: 8.375, // (30375 + (100 - 67.5) * 225) / 4500
+    btu_per_hr: 37687.5,
   });
 });
 
@@ -78,22 +87,26 @@ Deno.test("calculateAcSettings defaults to the standard SEER (4.5) when omitted 
 });
 
 Deno.test("calculateAcSettings scales power down for a more efficient unit", () => {
-  // SEER 9 vs standard 4.5 → multiplier 0.5
-  assertEquals(calculateAcSettings(0, "medium", 9).power_kw, 0.25); // 0.5 * 1.0 * (4.5/9)
-  assertEquals(calculateAcSettings(0, "small", 9).power_kw, 0.175); // 0.5 * 0.7 * (4.5/9)
+  // SEER 9 vs standard 4.5 → half the power for the same BTU/hr
+  assertEquals(calculateAcSettings(0, "medium", 9).power_kw, 0.25); // 2250 / (9 * 1000)
+  assertEquals(calculateAcSettings(0, "small", 9).power_kw, 0.175); // 1575 / (9 * 1000)
 });
 
 Deno.test("calculateAcSettings scales power up for a less efficient unit", () => {
-  // SEER 2.25 vs standard 4.5 → multiplier 2
-  assertEquals(calculateAcSettings(0, "medium", 2.25).power_kw, 1.0); // 0.5 * 1.0 * (4.5/2.25)
+  // SEER 2.25 vs standard 4.5 → double the power for the same BTU/hr
+  assertEquals(calculateAcSettings(0, "medium", 2.25).power_kw, 1.0); // 2250 / (2.25 * 1000)
 });
 
-Deno.test("calculateAcSettings applies the efficiency multiplier to the full-mode extra-person scaling too", () => {
-  // small room, SEER 9 (multiplier 0.5): base power = 4.5 * 0.7 * 0.5 = 1.575
-  assertEquals(calculateAcSettings(20, "small", 9), {
-    mode: "full",
-    temperature_c: 21,
-    fan_speed: 3,
-    power_kw: 1.7, // 1.575 + (20 - 15) * 0.05 * 0.5
-  });
+Deno.test("calculateAcSettings keeps required BTU/hr constant across SEER — only power_kw changes", () => {
+  const lowEfficiency = calculateAcSettings(20, "small", 2.25);
+  const standard = calculateAcSettings(20, "small", 4.5);
+  const highEfficiency = calculateAcSettings(20, "small", 9);
+
+  assertEquals(lowEfficiency.btu_per_hr, 15300);
+  assertEquals(standard.btu_per_hr, 15300);
+  assertEquals(highEfficiency.btu_per_hr, 15300);
+
+  assertEquals(lowEfficiency.power_kw, 6.8); // 15300 / 2250
+  assertEquals(standard.power_kw, 3.4); // 15300 / 4500
+  assertEquals(highEfficiency.power_kw, 1.7); // 15300 / 9000
 });

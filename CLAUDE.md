@@ -49,9 +49,9 @@ People count + Room size (m²) → Occupancy density (people ÷ m²)
 ↓
 Density → Determine AC mode
 ↓
-Mode + Room size → Base temperature, fan speed, power
+Mode + Room size → Base temperature, fan speed, required BTU/hr
 ↓
-Base power × (Standard SEER 4.5 ÷ selected SEER) → Efficiency-adjusted power
+Required BTU/hr ÷ (selected SEER × 1000) → power_kw
 ↓
 (Weather adjustment not yet implemented — pending science team criteria)
 ↓
@@ -64,15 +64,15 @@ Calculate energy (kWh) & CO₂ emissions
 - Large: 400+ m² → 450 m²
 
 **AC Modes** (by occupancy density = people ÷ representative m²):
-- **Eco** (density < 0.05 people/m²): 28°C, fan 1, 0.5 kW base
-- **Moderate** (0.05 ≤ density < 0.15 people/m²): 24°C, fan 2, 2.5 kW base
-- **Full** (density ≥ 0.15 people/m²): 21°C, fan 3, 4.5 kW base, scales up further with extra people beyond the full threshold
+- **Eco** (density < 0.05 people/m²): 28°C, fan 1, 2,250 BTU/hr base
+- **Moderate** (0.05 ≤ density < 0.15 people/m²): 24°C, fan 2, 11,250 BTU/hr base
+- **Full** (density ≥ 0.15 people/m²): 21°C, fan 3, 20,250 BTU/hr base, scales up further with extra people beyond the full threshold (+225 BTU/hr per extra person)
 
-Base power is also scaled by a room-size multiplier (small ×0.7, medium ×1.0, large ×1.5) — a bigger room has more air volume to cool. See `supabase/functions/_shared/acCalculation.ts` for the reference implementation (mirrored in `tools/calculation-tester.html` for local testing without Supabase running).
+Base BTU/hr is also scaled by a room-size multiplier (small ×0.7, medium ×1.0, large ×1.5) — a bigger room has more air volume to cool. See `supabase/functions/_shared/acCalculation.ts` for the reference implementation (mirrored in `tools/calculation-tester.html` for local testing without Supabase running).
 
 > Because the public-space m² scale is large, demoing mode changes needs a people-count range wider than a 0-10 slider (e.g. 0-100) — a 0-10 range only ever reaches "moderate" in a small room and never reaches "full" for any room size.
 
-**AC unit efficiency (SEER):** `power_kw = base_power_kw × room_size_multiplier × (4.5 ÷ selected_seer)`. "Auto" means SEER 4.5, giving a ×1 multiplier — today's power numbers are unchanged. A higher SEER (more efficient unit) scales power down; a lower SEER scales it up. Stored per room on `room_config.ac_seer` (default 4.5).
+**Cooling capacity (BTU/hr) and AC unit efficiency (SEER):** power is derived from physics, not an arbitrary per-mode kW table: `power_kw = required_btu_per_hr ÷ (selected_seer × 1000)`. `required_btu_per_hr` is the mode's base BTU/hr × room-size multiplier (+ extra-person BTU/hr in full mode) — it does **not** depend on SEER, matching how a real AC unit's rated BTU/hr capacity is fixed regardless of its efficiency. The BTU/hr numbers were derived from the original per-mode kW table at the standard reference SEER (4.5), so "Auto" (SEER 4.5) reproduces the original power numbers exactly. A higher SEER (more efficient unit) draws less power for the same BTU/hr; a lower SEER draws more. `calculateAcSettings` returns both `power_kw` and `btu_per_hr` (the latter useful for sizing/selecting a real unit). Stored per room on `room_config.ac_seer` (default 4.5) and returned on `ac_calculations.btu_per_hr`.
 
 **Thailand EGAT label:** stored on `room_config.egat_label` (`'1'`-`'5'` or `'premium'`, nullable). Purely cosmetic — shown in the UI only when `room_config.location` is Thailand, never read by `calculateAcSettings`.
 
@@ -93,9 +93,8 @@ Base power is also scaled by a room-size multiplier (small ×0.7, medium ×1.0, 
 **2. Temperature Calculation Algorithm** (3-4 hours)
 - Convert people count + room size → occupancy density
 - Select AC mode (eco/moderate/full) from density thresholds
-- Apply room size power multiplier
-- Apply AC efficiency multiplier (standard SEER 4.5 ÷ selected SEER)
-- Calculate power consumption (kW)
+- Apply room size multiplier to the mode's base BTU/hr (required cooling capacity)
+- Derive power consumption: power_kw = required BTU/hr ÷ (selected SEER × 1000)
 - Adjust for weather conditions (not yet implemented)
 
 **3. Mock Data Generator** (1-2 hours)

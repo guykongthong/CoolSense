@@ -189,6 +189,10 @@
         <div class="metric-value" id="powerValue"></div>
       </div>
       <div>
+        <div class="metric-label">Cooling capacity needed</div>
+        <div class="metric-value" id="btuValue"></div>
+      </div>
+      <div>
         <div class="metric-label">People / Room size</div>
         <div class="metric-value" id="inputSummary"></div>
       </div>
@@ -248,20 +252,20 @@
       <div class="grid3">
         <div class="field"><label for="densityModerate">Moderate at ≥</label><input id="densityModerate" type="number" min="0" step="0.001" /></div>
         <div class="field"><label for="densityFull">Full at ≥</label><input id="densityFull" type="number" min="0" step="0.001" /></div>
-        <div class="field"><label for="powerPerExtra">Power per extra person in full (kW)</label><input id="powerPerExtra" type="number" min="0" step="0.001" /></div>
+        <div class="field"><label for="btuPerExtra">BTU/hr per extra person in full</label><input id="btuPerExtra" type="number" min="0" step="1" /></div>
       </div>
     </fieldset>
 
     <fieldset>
       <legend>AC efficiency baseline</legend>
       <div class="field">
-        <label for="standardSeer">"Auto" SEER (the reference unit the base power numbers above assume; power scales by standardSeer ÷ selected SEER)</label>
+        <label for="standardSeer">"Auto" SEER (the reference unit the base BTU/hr numbers below assume; power_kw = btu_per_hr ÷ (selected SEER × 1000))</label>
         <input id="standardSeer" type="number" min="0.1" step="0.1" />
       </div>
     </fieldset>
 
     <fieldset>
-      <legend>Room size power multiplier</legend>
+      <legend>Room size cooling-capacity multiplier</legend>
       <div class="grid3">
         <div class="field"><label for="multSmall">Small</label><input id="multSmall" type="number" min="0" step="0.05" /></div>
         <div class="field"><label for="multMedium">Medium</label><input id="multMedium" type="number" min="0" step="0.05" /></div>
@@ -275,25 +279,25 @@
         <div></div>
         <label>Temperature (°C)</label>
         <label>Fan speed</label>
-        <label>Base power (kW)</label>
+        <label>Base BTU/hr</label>
       </div>
       <div class="mode-row">
         <div class="mode-name">Eco</div>
         <input id="ecoTemp" type="number" step="1" />
         <input id="ecoFan" type="number" min="1" step="1" />
-        <input id="ecoPower" type="number" min="0" step="0.1" />
+        <input id="ecoBtu" type="number" min="0" step="1" />
       </div>
       <div class="mode-row">
         <div class="mode-name">Moderate</div>
         <input id="moderateTemp" type="number" step="1" />
         <input id="moderateFan" type="number" min="1" step="1" />
-        <input id="moderatePower" type="number" min="0" step="0.1" />
+        <input id="moderateBtu" type="number" min="0" step="1" />
       </div>
       <div class="mode-row">
         <div class="mode-name">Full</div>
         <input id="fullTemp" type="number" step="1" />
         <input id="fullFan" type="number" min="1" step="1" />
-        <input id="fullPower" type="number" min="0" step="0.1" />
+        <input id="fullBtu" type="number" min="0" step="1" />
       </div>
     </fieldset>
 
@@ -311,13 +315,13 @@
     roomSizeSqm: { small: 100, medium: 275, large: 450 },
     densityModerate: 0.05,
     densityFull: 0.15,
-    powerPerExtraPersonKw: 0.05,
-    roomSizePowerMultiplier: { small: 0.7, medium: 1.0, large: 1.5 },
+    btuPerExtraPersonPerHr: 225,
+    roomSizeBtuMultiplier: { small: 0.7, medium: 1.0, large: 1.5 },
     standardSeer: 4.5,
     modeSettings: {
-      eco: { temperature_c: 28, fan_speed: 1, power_kw: 0.5 },
-      moderate: { temperature_c: 24, fan_speed: 2, power_kw: 2.5 },
-      full: { temperature_c: 21, fan_speed: 3, power_kw: 4.5 },
+      eco: { temperature_c: 28, fan_speed: 1, btu_per_hr: 2250 },
+      moderate: { temperature_c: 24, fan_speed: 2, btu_per_hr: 11250 },
+      full: { temperature_c: 21, fan_speed: 3, btu_per_hr: 20250 },
     },
   };
 
@@ -345,20 +349,20 @@
     sqmLarge: ['roomSizeSqm', 'large'],
     densityModerate: ['densityModerate'],
     densityFull: ['densityFull'],
-    powerPerExtra: ['powerPerExtraPersonKw'],
-    multSmall: ['roomSizePowerMultiplier', 'small'],
-    multMedium: ['roomSizePowerMultiplier', 'medium'],
-    multLarge: ['roomSizePowerMultiplier', 'large'],
+    btuPerExtra: ['btuPerExtraPersonPerHr'],
+    multSmall: ['roomSizeBtuMultiplier', 'small'],
+    multMedium: ['roomSizeBtuMultiplier', 'medium'],
+    multLarge: ['roomSizeBtuMultiplier', 'large'],
     standardSeer: ['standardSeer'],
     ecoTemp: ['modeSettings', 'eco', 'temperature_c'],
     ecoFan: ['modeSettings', 'eco', 'fan_speed'],
-    ecoPower: ['modeSettings', 'eco', 'power_kw'],
+    ecoBtu: ['modeSettings', 'eco', 'btu_per_hr'],
     moderateTemp: ['modeSettings', 'moderate', 'temperature_c'],
     moderateFan: ['modeSettings', 'moderate', 'fan_speed'],
-    moderatePower: ['modeSettings', 'moderate', 'power_kw'],
+    moderateBtu: ['modeSettings', 'moderate', 'btu_per_hr'],
     fullTemp: ['modeSettings', 'full', 'temperature_c'],
     fullFan: ['modeSettings', 'full', 'fan_speed'],
-    fullPower: ['modeSettings', 'full', 'power_kw'],
+    fullBtu: ['modeSettings', 'full', 'btu_per_hr'],
   };
 
   function getPath(obj, path) {
@@ -405,17 +409,18 @@
   function calculateAcSettings(peopleCount, roomSize, seer) {
     const mode = getAcMode(peopleCount, roomSize);
     const base = criteria.modeSettings[mode];
-    const efficiencyMultiplier = criteria.standardSeer / seer;
-    const basePower = base.power_kw * criteria.roomSizePowerMultiplier[roomSize] * efficiencyMultiplier;
+    const baseBtu = base.btu_per_hr * criteria.roomSizeBtuMultiplier[roomSize];
 
-    if (mode !== 'full') {
-      return { mode, temperature_c: base.temperature_c, fan_speed: base.fan_speed, power_kw: basePower };
+    let btu_per_hr = baseBtu;
+    if (mode === 'full') {
+      const fullThresholdPeople = criteria.densityFull * criteria.roomSizeSqm[roomSize];
+      const extraPeople = peopleCount - fullThresholdPeople;
+      btu_per_hr = baseBtu + extraPeople * criteria.btuPerExtraPersonPerHr;
     }
 
-    const fullThresholdPeople = criteria.densityFull * criteria.roomSizeSqm[roomSize];
-    const extraPeople = peopleCount - fullThresholdPeople;
-    const power_kw = basePower + extraPeople * criteria.powerPerExtraPersonKw * efficiencyMultiplier;
-    return { mode, temperature_c: base.temperature_c, fan_speed: base.fan_speed, power_kw };
+    // power (kW) = required BTU/hr ÷ (SEER × 1000)
+    const power_kw = btu_per_hr / (seer * 1000);
+    return { mode, temperature_c: base.temperature_c, fan_speed: base.fan_speed, power_kw, btu_per_hr };
   }
 
   function getSelectedSeer() {
@@ -449,6 +454,7 @@
     document.getElementById('tempValue').textContent = settings.temperature_c + '°C';
     document.getElementById('fanValue').textContent = 'Fan ' + settings.fan_speed;
     document.getElementById('powerValue').textContent = settings.power_kw.toFixed(2) + ' kW';
+    document.getElementById('btuValue').textContent = Math.round(settings.btu_per_hr).toLocaleString() + ' BTU/hr';
     document.getElementById('inputSummary').textContent = people + ' / ' + roomSize + ' / SEER ' + seer;
   }
 
@@ -514,6 +520,7 @@
       document.getElementById('tempValue').textContent = calc.temperature_c + '°C';
       document.getElementById('fanValue').textContent = 'Fan ' + calc.fan_speed;
       document.getElementById('powerValue').textContent = Number(calc.power_kw).toFixed(2) + ' kW';
+      document.getElementById('btuValue').textContent = Math.round(Number(calc.btu_per_hr)).toLocaleString() + ' BTU/hr';
       document.getElementById('inputSummary').textContent = people + ' / ' + roomSize;
 
       logStep('Open Supabase Studio to confirm the rows: http://127.0.0.1:54323/project/default/editor', true);
@@ -540,18 +547,25 @@
   document.getElementById('exportBtn').addEventListener('click', () => {
     const c = criteria;
     const snippet = `// Paste into supabase/functions/_shared/acCalculation.ts (and mirror in this file's DEFAULT_CRITERIA)
-const MODE_SETTINGS: Record<AcMode, Omit<AcSettings, "mode">> = {
-  eco: { temperature_c: ${c.modeSettings.eco.temperature_c}, fan_speed: ${c.modeSettings.eco.fan_speed}, power_kw: ${c.modeSettings.eco.power_kw} },
-  moderate: { temperature_c: ${c.modeSettings.moderate.temperature_c}, fan_speed: ${c.modeSettings.moderate.fan_speed}, power_kw: ${c.modeSettings.moderate.power_kw} },
-  full: { temperature_c: ${c.modeSettings.full.temperature_c}, fan_speed: ${c.modeSettings.full.fan_speed}, power_kw: ${c.modeSettings.full.power_kw} },
+const MODE_TEMP_FAN: Record<AcMode, { temperature_c: number; fan_speed: number }> = {
+  eco: { temperature_c: ${c.modeSettings.eco.temperature_c}, fan_speed: ${c.modeSettings.eco.fan_speed} },
+  moderate: { temperature_c: ${c.modeSettings.moderate.temperature_c}, fan_speed: ${c.modeSettings.moderate.fan_speed} },
+  full: { temperature_c: ${c.modeSettings.full.temperature_c}, fan_speed: ${c.modeSettings.full.fan_speed} },
+};
+
+const BASE_BTU_PER_HR: Record<AcMode, number> = {
+  eco: ${c.modeSettings.eco.btu_per_hr},
+  moderate: ${c.modeSettings.moderate.btu_per_hr},
+  full: ${c.modeSettings.full.btu_per_hr},
 };
 
 const ROOM_SIZE_SQM: Record<RoomSize, number> = { small: ${c.roomSizeSqm.small}, medium: ${c.roomSizeSqm.medium}, large: ${c.roomSizeSqm.large} };
-const ROOM_SIZE_POWER_MULTIPLIER: Record<RoomSize, number> = { small: ${c.roomSizePowerMultiplier.small}, medium: ${c.roomSizePowerMultiplier.medium}, large: ${c.roomSizePowerMultiplier.large} };
+const ROOM_SIZE_BTU_MULTIPLIER: Record<RoomSize, number> = { small: ${c.roomSizeBtuMultiplier.small}, medium: ${c.roomSizeBtuMultiplier.medium}, large: ${c.roomSizeBtuMultiplier.large} };
 
 const MODERATE_DENSITY = ${c.densityModerate};
 const FULL_DENSITY = ${c.densityFull};
-const POWER_PER_EXTRA_PERSON_KW = ${c.powerPerExtraPersonKw};
+const BTU_PER_EXTRA_PERSON_PER_HR = ${c.btuPerExtraPersonPerHr};
+const STANDARD_SEER = ${c.standardSeer};
 `;
     const output = document.getElementById('exportOutput');
     output.style.display = 'block';
