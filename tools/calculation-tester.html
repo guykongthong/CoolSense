@@ -127,6 +127,7 @@
     padding-top: 16px;
     --series-current: #2a78d6;
     --series-smart: #eb6834;
+    --series-hybrid: #1baf7a;
   }
   .sim-section h3 { font-size: 0.9rem; margin: 20px 0 8px; }
   #runSimBtn {
@@ -290,12 +291,19 @@
   </div>
 
   <div class="sim-section">
-    <h2>168-Hour Simulation: Current vs Smart</h2>
+    <h2>168-Hour Simulation: Static vs Current Model vs Hybrid</h2>
     <div class="live-note">
-      Generates mock occupancy for the given duration, runs the current-vs-smart comparison
-      (<code>/simulation/generate-mock-data</code> → <code>/simulation/run</code>), then charts the result
-      by reading <code>simulation_hourly_data</code> straight from the REST API. Uses the same
-      connection settings as the live-database section above.
+      Generates mock occupancy for the given duration, runs the static-vs-current-model comparison
+      (<code>/simulation/generate-mock-data</code> → <code>/simulation/run</code>) on the backend, reads
+      <code>simulation_hourly_data</code> via REST, then computes the hybrid model's numbers client-side
+      (mirroring <code>hybridCalculation.ts</code>) over that same occupancy data — so all three scenarios
+      run against identical input. Uses the same connection settings as the live-database section above.
+      <br><br>
+      <strong>Hybrid model:</strong> same mode/BTU/SEER logic as the current model, plus — when outside
+      conditions are <em>milder</em> than the 33°C/60%RH baseline — the setpoint relaxes (warmer, less
+      aggressive) within its mode's range, which legitimately draws less power. It never tightens further
+      when hot/humid; that heat load is already priced into the current model's weather multiplier, so
+      adjusting the setpoint too would double-count it.
     </div>
 
     <div class="grid3">
@@ -326,8 +334,9 @@
 
       <h3>Power over time (kW)</h3>
       <div class="chart-legend">
-        <span><span class="swatch" style="background:var(--series-current)"></span>Current (constant 25°C)</span>
-        <span><span class="swatch" style="background:var(--series-smart)"></span>Smart system</span>
+        <span><span class="swatch" style="background:var(--series-current)"></span>Static (constant 25°C)</span>
+        <span><span class="swatch" style="background:var(--series-smart)"></span>Current model</span>
+        <span><span class="swatch" style="background:var(--series-hybrid)"></span>Hybrid model</span>
       </div>
       <div class="chart-wrap" id="simPowerChartWrap">
         <div id="simPowerChart"></div>
@@ -336,8 +345,9 @@
 
       <h3>Cumulative energy (kWh)</h3>
       <div class="chart-legend">
-        <span><span class="swatch" style="background:var(--series-current)"></span>Current (constant 25°C)</span>
-        <span><span class="swatch" style="background:var(--series-smart)"></span>Smart system</span>
+        <span><span class="swatch" style="background:var(--series-current)"></span>Static (constant 25°C)</span>
+        <span><span class="swatch" style="background:var(--series-smart)"></span>Current model</span>
+        <span><span class="swatch" style="background:var(--series-hybrid)"></span>Hybrid model</span>
       </div>
       <div class="chart-wrap" id="simEnergyChartWrap">
         <div id="simEnergyChart"></div>
@@ -723,21 +733,99 @@
     return res.json();
   }
 
+  // Raw per-hour occupancy behind a simulation run — simulation_hourly_data
+  // only stores the resulting power numbers, not the people_count that
+  // produced them, so the hybrid model (computed client-side) needs this
+  // to run against the exact same occupancy the backend used.
+  async function fetchMockOccupancy(durationHours) {
+    const base = document.getElementById('apiBase').value.replace(/\/$/, '');
+    const apiKey = document.getElementById('apiKey').value;
+    const restBase = base.replace(/\/functions\/v1$/, '/rest/v1');
+    const url = `${restBase}/occupancy_readings?source=eq.mock&order=captured_at.desc&limit=${durationHours}&select=people_count,captured_at`;
+    const res = await fetch(url, { headers: { apiKey, Authorization: `Bearer ${apiKey}` } });
+    if (!res.ok) throw new Error(`fetching occupancy_readings → HTTP ${res.status}`);
+    const rows = await res.json();
+    return rows.slice().reverse().map(r => r.people_count); // oldest-first, matching hour_index order
+  }
+
+  // ---- Hybrid model: same mode/BTU/SEER logic as calculateAcSettings,
+  // plus a setpoint that relaxes (warmer, less power) when outside
+  // conditions are milder than baseline. Mirrors hybridCalculation.ts.
+  // Not tied to the editable `criteria` panel above — these ranges/factors
+  // are fixed to match the backend exactly.
+  const HYBRID_MODE_TEMP_RANGE = {
+    eco: { min: 26, max: 28 },
+    moderate: { min: 22, max: 26 },
+    full: { min: 19, max: 23 },
+  };
+  const HYBRID_TEMP_EASE_PER_C_BELOW_BASELINE = 0.3;
+  const HYBRID_HUMIDITY_EASE_PER_PCT_BELOW_BASELINE = 0.02;
+  const HYBRID_POWER_SAVINGS_PER_EASED_DEGREE_C = 0.05;
+  const HYBRID_MIN_EASE_MULTIPLIER = 0.5;
+
+  const WEATHER_CONDITION_PRESETS = {
+    cool: { tempC: 27, humidityPct: 55 },
+    warm: { tempC: 33, humidityPct: 60 },
+    hot: { tempC: 38, humidityPct: 75 },
+  };
+
+  function calculateHybridSettings(peopleCount, roomSize, seer, outsideTempC, humidityPct) {
+    const base = calculateAcSettings(peopleCount, roomSize, seer, outsideTempC, humidityPct);
+    const range = HYBRID_MODE_TEMP_RANGE[base.mode];
+
+    const tempEase = Math.max(0, HYBRID_TEMP_EASE_PER_C_BELOW_BASELINE * (criteria.weatherBaselineTemp - outsideTempC));
+    const humidityEase = Math.max(0, HYBRID_HUMIDITY_EASE_PER_PCT_BELOW_BASELINE * (criteria.weatherBaselineHumidity - humidityPct));
+
+    const adjusted_temp_c = Math.min(range.max, base.temperature_c + tempEase + humidityEase);
+    const appliedEase = adjusted_temp_c - base.temperature_c;
+
+    const powerEaseMultiplier = Math.max(HYBRID_MIN_EASE_MULTIPLIER, 1 - HYBRID_POWER_SAVINGS_PER_EASED_DEGREE_C * appliedEase);
+    const btu_per_hr = base.btu_per_hr * powerEaseMultiplier;
+    const power_kw = btu_per_hr / (seer * 1000);
+
+    return { mode: base.mode, fan_speed: base.fan_speed, base_temp_c: base.temperature_c, adjusted_temp_c, power_kw, btu_per_hr };
+  }
+
+  function computeHybridHourly(peopleCounts, roomSize, seer, weatherCondition) {
+    const preset = WEATHER_CONDITION_PRESETS[weatherCondition];
+    let cumKwh = 0, cumCo2 = 0;
+    return peopleCounts.map((people, hour_index) => {
+      const s = calculateHybridSettings(people, roomSize, seer, preset.tempC, preset.humidityPct);
+      cumKwh += s.power_kw;
+      cumCo2 = cumKwh * 0.5;
+      return {
+        hour_index,
+        hybrid_power_kw: s.power_kw,
+        hybrid_cumulative_kwh: cumKwh,
+        hybrid_cumulative_co2: cumCo2,
+        hybrid_adjusted_temp_c: s.adjusted_temp_c,
+      };
+    });
+  }
+
   function fmtNum(n, digits) {
     return Number(n).toLocaleString(undefined, { maximumFractionDigits: digits ?? 1, minimumFractionDigits: 0 });
   }
 
-  function renderStats(summary) {
-    const energySaved = summary.current_energy_kwh - summary.smart_energy_kwh;
-    const co2Saved = summary.current_co2_kg - summary.smart_co2_kg;
-    const costSaved = summary.current_cost_baht - summary.smart_cost_baht;
+  function renderStats(summary, hybridEnergyKwh) {
+    const hybridCo2Kg = hybridEnergyKwh * 0.5;
+    const hybridCostBaht = hybridEnergyKwh * 5;
+    const smartSaved = summary.current_energy_kwh - summary.smart_energy_kwh;
+    const hybridSaved = summary.current_energy_kwh - hybridEnergyKwh;
+    const hybridPctReduction = summary.current_energy_kwh > 0 ? (hybridSaved / summary.current_energy_kwh) * 100 : 0;
     const tiles = [
-      { label: 'Current energy', value: fmtNum(summary.current_energy_kwh) + ' kWh' },
-      { label: 'Smart energy', value: fmtNum(summary.smart_energy_kwh) + ' kWh' },
-      { label: 'Energy saved', value: fmtNum(energySaved) + ' kWh' },
-      { label: '% reduction', value: fmtNum(summary.pct_reduction) + '%' },
-      { label: 'CO₂ saved', value: fmtNum(co2Saved) + ' kg' },
-      { label: 'Cost saved', value: fmtNum(costSaved) + ' baht' },
+      { label: 'Static energy', value: fmtNum(summary.current_energy_kwh) + ' kWh' },
+      { label: 'Current model energy', value: fmtNum(summary.smart_energy_kwh) + ' kWh' },
+      { label: 'Hybrid energy', value: fmtNum(hybridEnergyKwh) + ' kWh' },
+      { label: 'Current model % reduction', value: fmtNum(summary.pct_reduction) + '%' },
+      { label: 'Hybrid % reduction', value: fmtNum(hybridPctReduction) + '%' },
+      { label: 'Hybrid extra savings vs current', value: fmtNum(summary.smart_energy_kwh - hybridEnergyKwh) + ' kWh' },
+      { label: 'Static CO₂', value: fmtNum(summary.current_co2_kg) + ' kg' },
+      { label: 'Current model CO₂', value: fmtNum(summary.smart_co2_kg) + ' kg' },
+      { label: 'Hybrid CO₂', value: fmtNum(hybridCo2Kg) + ' kg' },
+      { label: 'Static cost', value: fmtNum(summary.current_cost_baht) + ' baht' },
+      { label: 'Current model cost', value: fmtNum(summary.smart_cost_baht) + ' baht' },
+      { label: 'Hybrid cost', value: fmtNum(hybridCostBaht) + ' baht' },
     ];
     document.getElementById('simStats').innerHTML = tiles.map(t =>
       `<div class="sim-stat"><div class="sim-stat-label">${t.label}</div><div class="sim-stat-value">${t.value}</div></div>`
@@ -749,12 +837,16 @@
       <td>${h.hour_index}</td>
       <td>${fmtNum(h.current_power_kw, 2)}</td>
       <td>${fmtNum(h.smart_power_kw, 2)}</td>
+      <td>${fmtNum(h.hybrid_power_kw, 2)}</td>
       <td>${fmtNum(h.current_cumulative_kwh, 1)}</td>
       <td>${fmtNum(h.smart_cumulative_kwh, 1)}</td>
+      <td>${fmtNum(h.hybrid_cumulative_kwh, 1)}</td>
+      <td>${fmtNum(h.hybrid_adjusted_temp_c, 1)}</td>
     </tr>`).join('');
     document.getElementById('simTable').innerHTML = `
       <thead><tr>
-        <th>Hour</th><th>Current kW</th><th>Smart kW</th><th>Current cum. kWh</th><th>Smart cum. kWh</th>
+        <th>Hour</th><th>Static kW</th><th>Current kW</th><th>Hybrid kW</th>
+        <th>Static cum. kWh</th><th>Current cum. kWh</th><th>Hybrid cum. kWh</th><th>Hybrid temp °C</th>
       </tr></thead>
       <tbody>${rows}</tbody>`;
   }
@@ -856,15 +948,23 @@
       const hourly = await fetchHourlyData(run.simulation_run_id);
       simLogStep(`loaded ${hourly.length} hourly rows for charting`, true);
 
+      const peopleCounts = await fetchMockOccupancy(durationHours);
+      const seer = 4.5; // matches the "Keep SEER at 4.5" spec for this comparison
+      const hybridHourly = computeHybridHourly(peopleCounts, roomSize, seer, weatherCondition);
+      simLogStep(`computed hybrid model for ${hybridHourly.length} hours (client-side)`, true);
+
+      const merged = hourly.map((h, i) => ({ ...h, ...(hybridHourly[i] ?? {}) }));
+      const hybridEnergyKwh = hybridHourly.length ? hybridHourly[hybridHourly.length - 1].hybrid_cumulative_kwh : 0;
+
       document.getElementById('simResults').style.display = 'block';
-      renderStats(run.summary);
-      renderChart('simPowerChart', 'simPowerTooltip', hourly,
-        [{ key: 'current_power_kw', color: '#2a78d6' }, { key: 'smart_power_kw', color: '#eb6834' }],
+      renderStats(run.summary, hybridEnergyKwh);
+      renderChart('simPowerChart', 'simPowerTooltip', merged,
+        [{ key: 'current_power_kw', color: '#2a78d6' }, { key: 'smart_power_kw', color: '#eb6834' }, { key: 'hybrid_power_kw', color: '#1baf7a' }],
         'line');
-      renderChart('simEnergyChart', 'simEnergyTooltip', hourly,
-        [{ key: 'current_cumulative_kwh', color: '#2a78d6' }, { key: 'smart_cumulative_kwh', color: '#eb6834' }],
+      renderChart('simEnergyChart', 'simEnergyTooltip', merged,
+        [{ key: 'current_cumulative_kwh', color: '#2a78d6' }, { key: 'smart_cumulative_kwh', color: '#eb6834' }, { key: 'hybrid_cumulative_kwh', color: '#1baf7a' }],
         'area');
-      renderTable(hourly);
+      renderTable(merged);
     } catch (err) {
       simLogStep(err.message, false);
     }

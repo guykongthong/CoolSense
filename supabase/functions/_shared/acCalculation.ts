@@ -65,7 +65,7 @@ const BTU_PER_EXTRA_PERSON_PER_HR = 225;
 // electrical input) of the reference unit BASE_BTU_PER_HR was derived
 // against. "Auto" in the UI means STANDARD_SEER, so power_kw below comes out
 // identical to the original kW table.
-const STANDARD_SEER = 4.5;
+export const STANDARD_SEER = 4.5;
 
 // Outdoor conditions BASE_BTU_PER_HR implicitly assumes — a typical Thailand
 // peak design day. Hotter/more humid conditions than this raise the heat
@@ -73,8 +73,8 @@ const STANDARD_SEER = 4.5;
 // load from moisture), so required capacity scales up from here; milder
 // conditions scale it down. Omitting weather args uses this baseline, so the
 // multiplier is 1 and behavior is unchanged from before weather was wired in.
-const WEATHER_BASELINE_TEMP_C = 33;
-const WEATHER_BASELINE_HUMIDITY_PCT = 60;
+export const WEATHER_BASELINE_TEMP_C = 33;
+export const WEATHER_BASELINE_HUMIDITY_PCT = 60;
 
 // Rule-of-thumb load sensitivity: +2% required BTU/hr per °C above the
 // baseline outdoor temp (sensible heat gain scales with outdoor-indoor ΔT),

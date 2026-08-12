@@ -118,6 +118,11 @@ Base BTU/hr is also scaled by a room-size multiplier (small ×0.7, medium ×1.0,
 - `GET /simulation/:id/hourly-data` — that run's `simulation_hourly_data` rows ordered by `hour_index`, `[]` if none, 404 if the run itself doesn't exist
 - `GET /simulation/list` — last 10 `simulation_runs`, newest first (summary columns only)
 
+**Experimental: hybrid model** (`supabase/functions/_shared/hybridCalculation.ts`, `feature/hybrid-model`, not merged/wired into any endpoint yet):
+- Same mode selection, BTU sizing, and weather-driven capacity scaling as `calculateAcSettings`, plus a setpoint that **relaxes** (warmer, less power) when outside conditions are milder than the 33°C/60%RH baseline, within fixed per-mode ranges (eco 26-28°C, moderate 22-26°C, full 19-23°C): +0.3°C of relaxation per °C below baseline temp, +0.02°C per %RH below baseline humidity, then ~5% less required BTU/hr per degree relaxed
+- Deliberately does **not** tighten the setpoint further when hot/humid — that heat load is already priced into `calculateAcSettings`'s own weather multiplier, so adjusting the setpoint too would double-count it. This reverses an earlier draft of this idea (peer-proposed) that adjusted the setpoint colder when hot, which would have *increased* power while claiming to save it — an internally contradictory result. Confirmed with the user before implementing
+- `tools/calculation-tester.html`'s 168-hour simulation section charts all three: static (constant 25°C) vs current model (fixed per-mode temps) vs hybrid, computed client-side over the same mock occupancy data the backend simulation used
+
 **5. Admin Dashboard Display** (2-3 hours)
 - Show user inputs
 - Display recommended AC settings
