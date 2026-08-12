@@ -20,17 +20,43 @@ Deno.test("large room thresholds", () => {
   assertEquals(getAcMode(5, "large"), "full");
 });
 
-Deno.test("calculateAcSettings returns base settings for mode", () => {
+Deno.test("calculateAcSettings returns base settings for eco/moderate", () => {
   assertEquals(calculateAcSettings(0, "medium"), {
     mode: "eco",
     temperature_c: 28,
     fan_speed: 1,
     power_kw: 0.5,
   });
-  assertEquals(calculateAcSettings(10, "small"), {
+  assertEquals(calculateAcSettings(1, "medium"), {
+    mode: "moderate",
+    temperature_c: 24,
+    fan_speed: 2,
+    power_kw: 2.5,
+  });
+});
+
+Deno.test("calculateAcSettings holds temp/fan but scales power in full mode", () => {
+  // small room: full threshold is 3 people
+  assertEquals(calculateAcSettings(3, "small"), {
     mode: "full",
     temperature_c: 21,
     fan_speed: 3,
     power_kw: 4.5,
+  });
+  assertEquals(calculateAcSettings(10, "small"), {
+    mode: "full",
+    temperature_c: 21,
+    fan_speed: 3,
+    power_kw: 4.85, // 4.5 + (10 - 3) * 0.05
+  });
+});
+
+Deno.test("calculateAcSettings scales power for library-sized crowds", () => {
+  // large room: full threshold is 5 people
+  assertEquals(calculateAcSettings(100, "large"), {
+    mode: "full",
+    temperature_c: 21,
+    fan_speed: 3,
+    power_kw: 9.25, // 4.5 + (100 - 5) * 0.05
   });
 });

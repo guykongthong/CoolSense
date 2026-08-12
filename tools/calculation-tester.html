@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>AC Calculation Tester</title>
+<style>
+  body {
+    font-family: system-ui, sans-serif;
+    max-width: 480px;
+    margin: 40px auto;
+    padding: 0 16px;
+    color: #1a1a1a;
+  }
+  h1 { font-size: 1.25rem; }
+  .field { margin-bottom: 16px; }
+  label { display: block; margin-bottom: 4px; font-weight: 600; }
+  input, select {
+    width: 100%;
+    padding: 8px;
+    font-size: 1rem;
+    box-sizing: border-box;
+  }
+  button {
+    padding: 10px 16px;
+    font-size: 1rem;
+    cursor: pointer;
+  }
+  .dashboard {
+    margin-top: 24px;
+    padding: 20px;
+    border-radius: 8px;
+    border: 1px solid #ddd;
+  }
+  .dashboard.eco { background: #e8f5e9; border-color: #a5d6a7; }
+  .dashboard.moderate { background: #fff8e1; border-color: #ffe082; }
+  .dashboard.full { background: #ffebee; border-color: #ef9a9a; }
+  .mode { font-size: 1.5rem; font-weight: 700; text-transform: uppercase; }
+  .metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+  .metric-label { font-size: 0.8rem; color: #555; }
+  .metric-value { font-size: 1.2rem; font-weight: 600; }
+</style>
+</head>
+<body>
+  <h1>AC Calculation Tester</h1>
+  <p>Mirrors <code>supabase/functions/_shared/acCalculation.ts</code> for quick local testing without needing Docker/Supabase running. Keep the thresholds in sync if that file changes.</p>
+
+  <div class="field">
+    <label for="people">People in room</label>
+    <input id="people" type="number" min="0" value="0" />
+  </div>
+
+  <div class="field">
+    <label for="roomSize">Room size</label>
+    <select id="roomSize">
+      <option value="small">Small</option>
+      <option value="medium" selected>Medium</option>
+      <option value="large">Large</option>
+    </select>
+  </div>
+
+  <button id="calc">Calculate</button>
+
+  <div id="dashboard" class="dashboard" style="display:none;">
+    <div class="mode" id="modeLabel"></div>
+    <div class="metrics">
+      <div>
+        <div class="metric-label">Temperature</div>
+        <div class="metric-value" id="tempValue"></div>
+      </div>
+      <div>
+        <div class="metric-label">Fan speed</div>
+        <div class="metric-value" id="fanValue"></div>
+      </div>
+      <div>
+        <div class="metric-label">Power</div>
+        <div class="metric-value" id="powerValue"></div>
+      </div>
+      <div>
+        <div class="metric-label">People / Room size</div>
+        <div class="metric-value" id="inputSummary"></div>
+      </div>
+    </div>
+  </div>
+
+<script>
+  // Mirrors supabase/functions/_shared/acCalculation.ts
+  const MODE_SETTINGS = {
+    eco: { temperature_c: 28, fan_speed: 1, power_kw: 0.5 },
+    moderate: { temperature_c: 24, fan_speed: 2, power_kw: 2.5 },
+    full: { temperature_c: 21, fan_speed: 3, power_kw: 4.5 },
+  };
+  const MODERATE_THRESHOLD = { small: 1, medium: 1, large: 1 };
+  const FULL_THRESHOLD = { small: 3, medium: 4, large: 5 };
+  const POWER_PER_EXTRA_PERSON_KW = 0.05;
+
+  function getAcMode(peopleCount, roomSize) {
+    if (peopleCount >= FULL_THRESHOLD[roomSize]) return 'full';
+    if (peopleCount >= MODERATE_THRESHOLD[roomSize]) return 'moderate';
+    return 'eco';
+  }
+
+  function calculateAcSettings(peopleCount, roomSize) {
+    const mode = getAcMode(peopleCount, roomSize);
+    const base = MODE_SETTINGS[mode];
+
+    if (mode !== 'full') {
+      return { mode, ...base };
+    }
+
+    const extraPeople = peopleCount - FULL_THRESHOLD[roomSize];
+    const power_kw = base.power_kw + extraPeople * POWER_PER_EXTRA_PERSON_KW;
+    return { mode, temperature_c: base.temperature_c, fan_speed: base.fan_speed, power_kw };
+  }
+
+  document.getElementById('calc').addEventListener('click', () => {
+    const people = Math.max(0, parseInt(document.getElementById('people').value, 10) || 0);
+    const roomSize = document.getElementById('roomSize').value;
+    const settings = calculateAcSettings(people, roomSize);
+
+    const dashboard = document.getElementById('dashboard');
+    dashboard.style.display = 'block';
+    dashboard.className = 'dashboard ' + settings.mode;
+
+    document.getElementById('modeLabel').textContent = settings.mode;
+    document.getElementById('tempValue').textContent = settings.temperature_c + '°C';
+    document.getElementById('fanValue').textContent = 'Fan ' + settings.fan_speed;
+    document.getElementById('powerValue').textContent = settings.power_kw.toFixed(2) + ' kW';
+    document.getElementById('inputSummary').textContent = people + ' / ' + roomSize;
+  });
+</script>
+</body>
+</html>

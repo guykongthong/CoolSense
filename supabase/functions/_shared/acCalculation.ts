@@ -21,6 +21,11 @@ const MODE_SETTINGS: Record<AcMode, Omit<AcSettings, "mode">> = {
 const MODERATE_THRESHOLD: Record<RoomSize, number> = { small: 1, medium: 1, large: 1 };
 const FULL_THRESHOLD: Record<RoomSize, number> = { small: 3, medium: 4, large: 5 };
 
+// Once in "full" mode, more heat load (more people) means the AC needs more
+// cooling capacity to hold the same setpoint — power scales, temperature/fan
+// stay fixed. Tune this once real numbers are available.
+const POWER_PER_EXTRA_PERSON_KW = 0.05;
+
 export function getAcMode(peopleCount: number, roomSize: RoomSize): AcMode {
   if (peopleCount >= FULL_THRESHOLD[roomSize]) return "full";
   if (peopleCount >= MODERATE_THRESHOLD[roomSize]) return "moderate";
@@ -29,5 +34,14 @@ export function getAcMode(peopleCount: number, roomSize: RoomSize): AcMode {
 
 export function calculateAcSettings(peopleCount: number, roomSize: RoomSize): AcSettings {
   const mode = getAcMode(peopleCount, roomSize);
-  return { mode, ...MODE_SETTINGS[mode] };
+  const base = MODE_SETTINGS[mode];
+
+  if (mode !== "full") {
+    return { mode, ...base };
+  }
+
+  const extraPeople = peopleCount - FULL_THRESHOLD[roomSize];
+  const power_kw = base.power_kw + extraPeople * POWER_PER_EXTRA_PERSON_KW;
+
+  return { mode, temperature_c: base.temperature_c, fan_speed: base.fan_speed, power_kw };
 }
