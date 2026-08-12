@@ -5,6 +5,13 @@ import { withSupabase } from "@supabase/server";
 const VALID_ROOM_SIZES = ["small", "medium", "large"];
 const VALID_EGAT_LABELS = ["1", "2", "3", "4", "5", "premium"];
 
+// Same rule the frontend uses to decide whether to show the EGAT field —
+// kept in sync so a direct API call can't bypass the "Thailand only" rule
+// the UI enforces by hiding the input.
+function isThailand(location: string | null | undefined): boolean {
+  return (location ?? "").trim().toLowerCase().includes("thailand");
+}
+
 interface RoomConfigBody {
   building_name?: string;
   room_size?: string;
@@ -46,12 +53,35 @@ export default {
 
     // deno-lint-ignore no-explicit-any
     const db = ctx.supabaseAdmin as any;
+
+    if (egat_label !== undefined && egat_label !== null) {
+      // location may be changing in this same request — resolve against
+      // whichever value will actually be stored, not just what's on disk.
+      let effectiveLocation = location;
+      if (effectiveLocation === undefined) {
+        const { data: current } = await db.from("room_config").select("location").eq("id", 1).maybeSingle();
+        effectiveLocation = current?.location;
+      }
+      if (!isThailand(effectiveLocation)) {
+        return Response.json(
+          { message: "egat_label can only be set when location is Thailand" },
+          { status: 400 },
+        );
+      }
+    }
+
     const update: Record<string, unknown> = {};
     if (building_name !== undefined) update.building_name = building_name;
     if (room_size !== undefined) update.room_size = room_size;
     if (location !== undefined) update.location = location;
     if (ac_seer !== undefined) update.ac_seer = ac_seer;
     if (egat_label !== undefined) update.egat_label = egat_label;
+
+    // Moving location away from Thailand invalidates any previously stored
+    // label, even if this request didn't touch egat_label itself.
+    if (location !== undefined && !isThailand(location) && egat_label === undefined) {
+      update.egat_label = null;
+    }
 
     const { data, error } = await db
       .from("room_config")
