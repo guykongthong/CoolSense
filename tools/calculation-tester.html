@@ -140,6 +140,37 @@
     </select>
   </div>
 
+  <div class="field">
+    <label for="location">Location</label>
+    <input id="location" type="text" placeholder="e.g. Thailand" value="Thailand" />
+  </div>
+
+  <div class="field">
+    <label for="acEfficiency">AC unit efficiency</label>
+    <select id="acEfficiency">
+      <option value="auto" selected>Auto (4.5 SEER, standard)</option>
+      <option value="custom">Custom SEER…</option>
+    </select>
+  </div>
+
+  <div class="field" id="customSeerField" style="display:none;">
+    <label for="customSeer">Custom SEER value</label>
+    <input id="customSeer" type="number" min="0.1" step="0.1" value="4.5" />
+  </div>
+
+  <div class="field" id="egatField" style="display:none;">
+    <label for="egatLabel">Thailand EGAT efficiency label (cosmetic, doesn't affect calculation)</label>
+    <select id="egatLabel">
+      <option value="">None</option>
+      <option value="1">1 star</option>
+      <option value="2">2 stars</option>
+      <option value="3">3 stars</option>
+      <option value="4">4 stars</option>
+      <option value="5" selected>5 stars</option>
+      <option value="premium">Premium (5 stars+)</option>
+    </select>
+  </div>
+
   <button id="calc">Calculate</button>
 
   <div id="dashboard" class="dashboard" style="display:none;">
@@ -222,6 +253,14 @@
     </fieldset>
 
     <fieldset>
+      <legend>AC efficiency baseline</legend>
+      <div class="field">
+        <label for="standardSeer">"Auto" SEER (the reference unit the base power numbers above assume; power scales by standardSeer ÷ selected SEER)</label>
+        <input id="standardSeer" type="number" min="0.1" step="0.1" />
+      </div>
+    </fieldset>
+
+    <fieldset>
       <legend>Room size power multiplier</legend>
       <div class="grid3">
         <div class="field"><label for="multSmall">Small</label><input id="multSmall" type="number" min="0" step="0.05" /></div>
@@ -274,6 +313,7 @@
     densityFull: 0.15,
     powerPerExtraPersonKw: 0.05,
     roomSizePowerMultiplier: { small: 0.7, medium: 1.0, large: 1.5 },
+    standardSeer: 4.5,
     modeSettings: {
       eco: { temperature_c: 28, fan_speed: 1, power_kw: 0.5 },
       moderate: { temperature_c: 24, fan_speed: 2, power_kw: 2.5 },
@@ -309,6 +349,7 @@
     multSmall: ['roomSizePowerMultiplier', 'small'],
     multMedium: ['roomSizePowerMultiplier', 'medium'],
     multLarge: ['roomSizePowerMultiplier', 'large'],
+    standardSeer: ['standardSeer'],
     ecoTemp: ['modeSettings', 'eco', 'temperature_c'],
     ecoFan: ['modeSettings', 'eco', 'fan_speed'],
     ecoPower: ['modeSettings', 'eco', 'power_kw'],
@@ -361,10 +402,11 @@
     return 'eco';
   }
 
-  function calculateAcSettings(peopleCount, roomSize) {
+  function calculateAcSettings(peopleCount, roomSize, seer) {
     const mode = getAcMode(peopleCount, roomSize);
     const base = criteria.modeSettings[mode];
-    const basePower = base.power_kw * criteria.roomSizePowerMultiplier[roomSize];
+    const efficiencyMultiplier = criteria.standardSeer / seer;
+    const basePower = base.power_kw * criteria.roomSizePowerMultiplier[roomSize] * efficiencyMultiplier;
 
     if (mode !== 'full') {
       return { mode, temperature_c: base.temperature_c, fan_speed: base.fan_speed, power_kw: basePower };
@@ -372,14 +414,32 @@
 
     const fullThresholdPeople = criteria.densityFull * criteria.roomSizeSqm[roomSize];
     const extraPeople = peopleCount - fullThresholdPeople;
-    const power_kw = basePower + extraPeople * criteria.powerPerExtraPersonKw;
+    const power_kw = basePower + extraPeople * criteria.powerPerExtraPersonKw * efficiencyMultiplier;
     return { mode, temperature_c: base.temperature_c, fan_speed: base.fan_speed, power_kw };
+  }
+
+  function getSelectedSeer() {
+    const mode = document.getElementById('acEfficiency').value;
+    if (mode === 'auto') return criteria.standardSeer;
+    const custom = parseFloat(document.getElementById('customSeer').value);
+    return Number.isFinite(custom) && custom > 0 ? custom : criteria.standardSeer;
+  }
+
+  function isThailand() {
+    return document.getElementById('location').value.trim().toLowerCase().includes('thailand');
+  }
+
+  function updateConditionalFields() {
+    document.getElementById('customSeerField').style.display =
+      document.getElementById('acEfficiency').value === 'custom' ? 'block' : 'none';
+    document.getElementById('egatField').style.display = isThailand() ? 'block' : 'none';
   }
 
   function runCalculation() {
     const people = Math.max(0, parseInt(document.getElementById('people').value, 10) || 0);
     const roomSize = document.getElementById('roomSize').value;
-    const settings = calculateAcSettings(people, roomSize);
+    const seer = getSelectedSeer();
+    const settings = calculateAcSettings(people, roomSize, seer);
 
     const dashboard = document.getElementById('dashboard');
     dashboard.style.display = 'block';
@@ -389,10 +449,13 @@
     document.getElementById('tempValue').textContent = settings.temperature_c + '°C';
     document.getElementById('fanValue').textContent = 'Fan ' + settings.fan_speed;
     document.getElementById('powerValue').textContent = settings.power_kw.toFixed(2) + ' kW';
-    document.getElementById('inputSummary').textContent = people + ' / ' + roomSize;
+    document.getElementById('inputSummary').textContent = people + ' / ' + roomSize + ' / SEER ' + seer;
   }
 
   document.getElementById('calc').addEventListener('click', runCalculation);
+  document.getElementById('acEfficiency').addEventListener('change', () => { updateConditionalFields(); runCalculation(); });
+  document.getElementById('customSeer').addEventListener('input', runCalculation);
+  document.getElementById('location').addEventListener('input', updateConditionalFields);
 
   function logStep(text, ok) {
     const log = document.getElementById('liveLog');
@@ -424,9 +487,18 @@
     const people = Math.max(0, parseInt(document.getElementById('people').value, 10) || 0);
     const roomSize = document.getElementById('roomSize').value;
     const buildingName = document.getElementById('buildingName').value;
+    const location = document.getElementById('location').value;
+    const seer = getSelectedSeer();
+    const egatLabel = isThailand() ? (document.getElementById('egatLabel').value || null) : null;
 
     try {
-      const room = await callFunction('room-config', { building_name: buildingName, room_size: roomSize });
+      const room = await callFunction('room-config', {
+        building_name: buildingName,
+        room_size: roomSize,
+        location,
+        ac_seer: seer,
+        egat_label: egatLabel,
+      });
       logStep(`room-config saved: ${JSON.stringify(room)}`, true);
 
       const reading = await callFunction('occupancy-readings', { people_count: people, source: 'manual' });
@@ -488,6 +560,7 @@ const POWER_PER_EXTRA_PERSON_KW = ${c.powerPerExtraPersonKw};
   });
 
   populateInputs();
+  updateConditionalFields();
   runCalculation();
 </script>
 </body>

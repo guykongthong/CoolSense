@@ -71,3 +71,29 @@ Deno.test("calculateAcSettings scales power for library-sized crowds", () => {
     power_kw: 8.375, // 6.75 + (100 - 67.5) * 0.05
   });
 });
+
+Deno.test("calculateAcSettings defaults to the standard SEER (4.5) when omitted — power unchanged", () => {
+  assertEquals(calculateAcSettings(0, "medium").power_kw, 0.5);
+  assertEquals(calculateAcSettings(0, "medium", 4.5).power_kw, 0.5);
+});
+
+Deno.test("calculateAcSettings scales power down for a more efficient unit", () => {
+  // SEER 9 vs standard 4.5 → multiplier 0.5
+  assertEquals(calculateAcSettings(0, "medium", 9).power_kw, 0.25); // 0.5 * 1.0 * (4.5/9)
+  assertEquals(calculateAcSettings(0, "small", 9).power_kw, 0.175); // 0.5 * 0.7 * (4.5/9)
+});
+
+Deno.test("calculateAcSettings scales power up for a less efficient unit", () => {
+  // SEER 2.25 vs standard 4.5 → multiplier 2
+  assertEquals(calculateAcSettings(0, "medium", 2.25).power_kw, 1.0); // 0.5 * 1.0 * (4.5/2.25)
+});
+
+Deno.test("calculateAcSettings applies the efficiency multiplier to the full-mode extra-person scaling too", () => {
+  // small room, SEER 9 (multiplier 0.5): base power = 4.5 * 0.7 * 0.5 = 1.575
+  assertEquals(calculateAcSettings(20, "small", 9), {
+    mode: "full",
+    temperature_c: 21,
+    fan_speed: 3,
+    power_kw: 1.7, // 1.575 + (20 - 15) * 0.05 * 0.5
+  });
+});

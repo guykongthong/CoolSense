@@ -7,8 +7,11 @@ import { calculateAcSettings, type RoomSize } from "../_shared/acCalculation.ts"
 // TODO: weather is not factored in yet — pending criteria from the science team.
 const DEFAULT_ROOM_SIZE: RoomSize = "medium";
 
+const DEFAULT_AC_SEER = 4.5;
+
 interface RoomConfigRow {
   room_size: RoomSize;
+  ac_seer: number;
 }
 
 interface OccupancyReadingRow {
@@ -25,7 +28,7 @@ export default {
       { data: RoomConfigRow | null },
       { data: OccupancyReadingRow | null },
     ] = await Promise.all([
-      db.from("room_config").select("room_size").eq("id", 1).maybeSingle(),
+      db.from("room_config").select("room_size, ac_seer").eq("id", 1).maybeSingle(),
       db
         .from("occupancy_readings")
         .select("id, people_count")
@@ -36,8 +39,9 @@ export default {
 
     const roomSize = (roomConfig?.room_size as RoomSize) ?? DEFAULT_ROOM_SIZE;
     const peopleCount = reading?.people_count ?? 0;
+    const acSeer = roomConfig?.ac_seer ?? DEFAULT_AC_SEER;
 
-    const settings = calculateAcSettings(peopleCount, roomSize);
+    const settings = calculateAcSettings(peopleCount, roomSize, acSeer);
 
     const { data: calculation, error } = await db
       .from("ac_calculations")

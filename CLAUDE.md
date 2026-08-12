@@ -34,9 +34,12 @@
 
 **Input:**
 - Building name
+- Location (manual text input for now — IP geolocation deferred; also feeds the future weather-by-location feature)
 - Room size (small/medium/large — public-space scale, see below)
 - Number of people in the room (currently a manual slider/number input; will be replaced by ML-based people counting from camera input later — see `supabase/functions/occupancy`)
 - Weather (hot/warm/cool)
+- AC unit efficiency (SEER) — "Auto" (4.5 SEER, the standard reference unit) or a custom SEER value; global per room, always shown
+- Thailand EGAT efficiency label (1-5 stars, or "premium") — **only shown when location is Thailand**; cosmetic/credibility only, does not affect the calculation
 
 > Occupancy is **not** derived from CO₂ level. People count comes directly from an `occupancy_readings` table (mocked today, ML-populated later). CO₂ was the original plan but was dropped in favor of direct people counting.
 
@@ -46,7 +49,9 @@ People count + Room size (m²) → Occupancy density (people ÷ m²)
 ↓
 Density → Determine AC mode
 ↓
-Mode + Room size → Calculate temperature, fan speed, power
+Mode + Room size → Base temperature, fan speed, power
+↓
+Base power × (Standard SEER 4.5 ÷ selected SEER) → Efficiency-adjusted power
 ↓
 (Weather adjustment not yet implemented — pending science team criteria)
 ↓
@@ -67,21 +72,29 @@ Base power is also scaled by a room-size multiplier (small ×0.7, medium ×1.0, 
 
 > Because the public-space m² scale is large, demoing mode changes needs a people-count range wider than a 0-10 slider (e.g. 0-100) — a 0-10 range only ever reaches "moderate" in a small room and never reaches "full" for any room size.
 
+**AC unit efficiency (SEER):** `power_kw = base_power_kw × room_size_multiplier × (4.5 ÷ selected_seer)`. "Auto" means SEER 4.5, giving a ×1 multiplier — today's power numbers are unchanged. A higher SEER (more efficient unit) scales power down; a lower SEER scales it up. Stored per room on `room_config.ac_seer` (default 4.5).
+
+**Thailand EGAT label:** stored on `room_config.egat_label` (`'1'`-`'5'` or `'premium'`, nullable). Purely cosmetic — shown in the UI only when `room_config.location` is Thailand, never read by `calculateAcSettings`.
+
 ---
 
 ## Core MVPs (5 Items)
 
 **1. Input Form** (2-3 hours)
 - Building name input
+- Location input (text; drives the conditional EGAT field and later weather-by-location)
 - Room size dropdown
 - People-count input (slider/number, wide enough range e.g. 0-100 to demo all modes — placeholder for future ML camera-based counting)
 - Weather selector
+- AC unit efficiency selector (Auto / custom SEER) — always shown, global per room
+- Thailand EGAT efficiency label selector — only shown when location is Thailand
 - Submit button
 
 **2. Temperature Calculation Algorithm** (3-4 hours)
 - Convert people count + room size → occupancy density
 - Select AC mode (eco/moderate/full) from density thresholds
 - Apply room size power multiplier
+- Apply AC efficiency multiplier (standard SEER 4.5 ÷ selected SEER)
 - Calculate power consumption (kW)
 - Adjust for weather conditions (not yet implemented)
 
@@ -91,7 +104,7 @@ Base power is also scaled by a room-size multiplier (small ×0.7, medium ×1.0, 
 
 **4. System Simulation & Comparison** (1-2 hours)
 - Run current system (always 25°C, 4.5 kW) for 168 hours
-- Run smart system (variable based on CO₂) for 168 hours
+- Run smart system (variable based on occupancy) for 168 hours
 - Calculate metrics:
   - Energy used (kWh)
   - CO₂ emissions (kg)

@@ -48,6 +48,13 @@ const FULL_DENSITY = 0.15;
 // real numbers are available.
 const POWER_PER_EXTRA_PERSON_KW = 0.05;
 
+// SEER (Seasonal Energy Efficiency Ratio) of the reference unit our base
+// power numbers above were modeled on. A unit with a higher SEER than this
+// draws less power for the same cooling output — scale power by
+// STANDARD_SEER ÷ unit's SEER. "Auto" in the UI means STANDARD_SEER, so the
+// multiplier is 1 and power is unchanged from today's numbers.
+const STANDARD_SEER = 4.5;
+
 function getOccupancyDensity(peopleCount: number, roomSize: RoomSize): number {
   return peopleCount / ROOM_SIZE_SQM[roomSize];
 }
@@ -59,10 +66,15 @@ export function getAcMode(peopleCount: number, roomSize: RoomSize): AcMode {
   return "eco";
 }
 
-export function calculateAcSettings(peopleCount: number, roomSize: RoomSize): AcSettings {
+export function calculateAcSettings(
+  peopleCount: number,
+  roomSize: RoomSize,
+  seer: number = STANDARD_SEER,
+): AcSettings {
   const mode = getAcMode(peopleCount, roomSize);
   const base = MODE_SETTINGS[mode];
-  const basePower = base.power_kw * ROOM_SIZE_POWER_MULTIPLIER[roomSize];
+  const efficiencyMultiplier = STANDARD_SEER / seer;
+  const basePower = base.power_kw * ROOM_SIZE_POWER_MULTIPLIER[roomSize] * efficiencyMultiplier;
 
   if (mode !== "full") {
     return { mode, temperature_c: base.temperature_c, fan_speed: base.fan_speed, power_kw: basePower };
@@ -70,7 +82,7 @@ export function calculateAcSettings(peopleCount: number, roomSize: RoomSize): Ac
 
   const fullThresholdPeople = FULL_DENSITY * ROOM_SIZE_SQM[roomSize];
   const extraPeople = peopleCount - fullThresholdPeople;
-  const power_kw = basePower + extraPeople * POWER_PER_EXTRA_PERSON_KW;
+  const power_kw = basePower + extraPeople * POWER_PER_EXTRA_PERSON_KW * efficiencyMultiplier;
 
   return { mode, temperature_c: base.temperature_c, fan_speed: base.fan_speed, power_kw };
 }

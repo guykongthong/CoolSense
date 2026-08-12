@@ -3,10 +3,14 @@ import "@supabase/functions-js/edge-runtime.d.ts";
 import { withSupabase } from "@supabase/server";
 
 const VALID_ROOM_SIZES = ["small", "medium", "large"];
+const VALID_EGAT_LABELS = ["1", "2", "3", "4", "5", "premium"];
 
 interface RoomConfigBody {
   building_name?: string;
   room_size?: string;
+  location?: string;
+  ac_seer?: number;
+  egat_label?: string | null;
 }
 
 export default {
@@ -22,11 +26,20 @@ export default {
       return Response.json({ message: "Invalid JSON body" }, { status: 400 });
     }
 
-    const { building_name, room_size } = body;
+    const { building_name, room_size, location, ac_seer, egat_label } = body;
 
     if (room_size !== undefined && !VALID_ROOM_SIZES.includes(room_size)) {
       return Response.json(
         { message: `room_size must be one of ${VALID_ROOM_SIZES.join(", ")}` },
+        { status: 400 },
+      );
+    }
+    if (ac_seer !== undefined && (typeof ac_seer !== "number" || ac_seer <= 0)) {
+      return Response.json({ message: "ac_seer must be a positive number" }, { status: 400 });
+    }
+    if (egat_label !== undefined && egat_label !== null && !VALID_EGAT_LABELS.includes(egat_label)) {
+      return Response.json(
+        { message: `egat_label must be one of ${VALID_EGAT_LABELS.join(", ")}, or null` },
         { status: 400 },
       );
     }
@@ -36,6 +49,9 @@ export default {
     const update: Record<string, unknown> = {};
     if (building_name !== undefined) update.building_name = building_name;
     if (room_size !== undefined) update.room_size = room_size;
+    if (location !== undefined) update.location = location;
+    if (ac_seer !== undefined) update.ac_seer = ac_seer;
+    if (egat_label !== undefined) update.egat_label = egat_label;
 
     const { data, error } = await db
       .from("room_config")
@@ -61,6 +77,6 @@ export default {
   curl -i --location --request POST 'http://127.0.0.1:54321/functions/v1/room-config' \
     --header 'apiKey: sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH' \
     --header 'Content-Type: application/json' \
-    --data '{"building_name":"Central Library","room_size":"medium"}'
+    --data '{"building_name":"Central Library","room_size":"medium","location":"Thailand","ac_seer":4.5,"egat_label":"5"}'
 
 */
