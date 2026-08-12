@@ -48,7 +48,11 @@ export default {
       db.from("room_config").select("room_size, ac_seer").eq("id", 1).maybeSingle(),
       db
         .from("occupancy_readings")
+        // Excludes mock/simulation data — this is the live calculation path,
+        // and mock rows can have captured_at close to "now", which would
+        // otherwise let a simulation run transiently hijack live results.
         .select("id, people_count")
+        .neq("source", "mock")
         .order("captured_at", { ascending: false })
         .limit(1)
         .maybeSingle(),

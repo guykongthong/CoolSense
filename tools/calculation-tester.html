@@ -120,6 +120,54 @@
   details.live-config { margin-bottom: 12px; }
   details.live-config summary { cursor: pointer; font-size: 0.85rem; color: #555; }
   details.live-config .field { margin-top: 8px; }
+
+  .sim-section {
+    margin-top: 32px;
+    border-top: 2px solid #ddd;
+    padding-top: 16px;
+    --series-current: #2a78d6;
+    --series-smart: #eb6834;
+  }
+  .sim-section h3 { font-size: 0.9rem; margin: 20px 0 8px; }
+  #runSimBtn {
+    background: #1565c0;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+  }
+  .sim-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 12px;
+    margin-top: 16px;
+  }
+  .sim-stat { padding: 10px 12px; border: 1px solid #e0e0e0; border-radius: 6px; }
+  .sim-stat-label { font-size: 0.72rem; color: #666; text-transform: uppercase; letter-spacing: 0.02em; }
+  .sim-stat-value { font-size: 1.15rem; font-weight: 700; margin-top: 2px; }
+  .chart-wrap { position: relative; }
+  .chart-legend { display: flex; gap: 16px; margin-bottom: 6px; font-size: 0.8rem; }
+  .chart-legend .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+  .chart-tooltip {
+    position: absolute;
+    pointer-events: none;
+    background: #1a1a1a;
+    color: #fff;
+    font-size: 0.72rem;
+    padding: 6px 8px;
+    border-radius: 4px;
+    line-height: 1.5;
+    white-space: nowrap;
+    display: none;
+    transform: translate(-50%, -110%);
+    z-index: 5;
+  }
+  .sim-table-details { margin-top: 10px; }
+  .sim-table-details summary { cursor: pointer; font-size: 0.85rem; color: #555; }
+  .sim-table-wrap { max-height: 260px; overflow: auto; margin-top: 8px; border: 1px solid #e0e0e0; border-radius: 6px; }
+  table.sim-table { border-collapse: collapse; width: 100%; font-size: 0.75rem; }
+  table.sim-table th, table.sim-table td { padding: 4px 8px; text-align: right; font-variant-numeric: tabular-nums; border-bottom: 1px solid #eee; }
+  table.sim-table th:first-child, table.sim-table td:first-child { text-align: left; }
+  table.sim-table th { position: sticky; top: 0; background: #fafafa; }
 </style>
 </head>
 <body>
@@ -239,6 +287,70 @@
 
     <button id="submitLiveBtn">Submit &amp; save to database</button>
     <div id="liveLog" class="live-log"></div>
+  </div>
+
+  <div class="sim-section">
+    <h2>168-Hour Simulation: Current vs Smart</h2>
+    <div class="live-note">
+      Generates mock occupancy for the given duration, runs the current-vs-smart comparison
+      (<code>/simulation/generate-mock-data</code> → <code>/simulation/run</code>), then charts the result
+      by reading <code>simulation_hourly_data</code> straight from the REST API. Uses the same
+      connection settings as the live-database section above.
+    </div>
+
+    <div class="grid3">
+      <div class="field"><label for="simDuration">Duration (hours)</label><input id="simDuration" type="number" min="1" value="168" /></div>
+      <div class="field">
+        <label for="simRoomSize">Room size</label>
+        <select id="simRoomSize">
+          <option value="small">Small</option>
+          <option value="medium" selected>Medium</option>
+          <option value="large">Large</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="simWeather">Weather condition</label>
+        <select id="simWeather">
+          <option value="cool">Cool</option>
+          <option value="warm" selected>Warm</option>
+          <option value="hot">Hot</option>
+        </select>
+      </div>
+    </div>
+
+    <button id="runSimBtn">Generate mock data + run simulation</button>
+    <div id="simLog" class="live-log"></div>
+
+    <div id="simResults" style="display:none;">
+      <div class="sim-stats" id="simStats"></div>
+
+      <h3>Power over time (kW)</h3>
+      <div class="chart-legend">
+        <span><span class="swatch" style="background:var(--series-current)"></span>Current (constant 25°C)</span>
+        <span><span class="swatch" style="background:var(--series-smart)"></span>Smart system</span>
+      </div>
+      <div class="chart-wrap" id="simPowerChartWrap">
+        <div id="simPowerChart"></div>
+        <div class="chart-tooltip" id="simPowerTooltip"></div>
+      </div>
+
+      <h3>Cumulative energy (kWh)</h3>
+      <div class="chart-legend">
+        <span><span class="swatch" style="background:var(--series-current)"></span>Current (constant 25°C)</span>
+        <span><span class="swatch" style="background:var(--series-smart)"></span>Smart system</span>
+      </div>
+      <div class="chart-wrap" id="simEnergyChartWrap">
+        <div id="simEnergyChart"></div>
+        <div class="chart-tooltip" id="simEnergyTooltip"></div>
+      </div>
+
+      <details class="sim-table-details">
+        <summary>Table view (all hours)</summary>
+        <div class="sim-table-wrap">
+          <table class="sim-table" id="simTable"></table>
+        </div>
+      </details>
+    </div>
   </div>
 
   <div class="criteria">
@@ -587,6 +699,174 @@
       logStep('Open Supabase Studio to confirm the rows: http://127.0.0.1:54323/project/default/editor', true);
     } catch (err) {
       logStep(err.message, false);
+    }
+  });
+
+  // ---- 168-hour simulation charts ----
+
+  function simLogStep(text, ok) {
+    const log = document.getElementById('simLog');
+    log.style.display = 'block';
+    const line = document.createElement('div');
+    line.className = 'step ' + (ok ? 'ok' : 'err');
+    line.textContent = (ok ? '✓ ' : '✗ ') + text;
+    log.appendChild(line);
+  }
+
+  async function fetchHourlyData(simulationRunId) {
+    const base = document.getElementById('apiBase').value.replace(/\/$/, '');
+    const apiKey = document.getElementById('apiKey').value;
+    const restBase = base.replace(/\/functions\/v1$/, '/rest/v1');
+    const url = `${restBase}/simulation_hourly_data?simulation_run_id=eq.${simulationRunId}&order=hour_index.asc&select=*`;
+    const res = await fetch(url, { headers: { apiKey, Authorization: `Bearer ${apiKey}` } });
+    if (!res.ok) throw new Error(`fetching simulation_hourly_data → HTTP ${res.status}`);
+    return res.json();
+  }
+
+  function fmtNum(n, digits) {
+    return Number(n).toLocaleString(undefined, { maximumFractionDigits: digits ?? 1, minimumFractionDigits: 0 });
+  }
+
+  function renderStats(summary) {
+    const energySaved = summary.current_energy_kwh - summary.smart_energy_kwh;
+    const co2Saved = summary.current_co2_kg - summary.smart_co2_kg;
+    const costSaved = summary.current_cost_baht - summary.smart_cost_baht;
+    const tiles = [
+      { label: 'Current energy', value: fmtNum(summary.current_energy_kwh) + ' kWh' },
+      { label: 'Smart energy', value: fmtNum(summary.smart_energy_kwh) + ' kWh' },
+      { label: 'Energy saved', value: fmtNum(energySaved) + ' kWh' },
+      { label: '% reduction', value: fmtNum(summary.pct_reduction) + '%' },
+      { label: 'CO₂ saved', value: fmtNum(co2Saved) + ' kg' },
+      { label: 'Cost saved', value: fmtNum(costSaved) + ' baht' },
+    ];
+    document.getElementById('simStats').innerHTML = tiles.map(t =>
+      `<div class="sim-stat"><div class="sim-stat-label">${t.label}</div><div class="sim-stat-value">${t.value}</div></div>`
+    ).join('');
+  }
+
+  function renderTable(hourly) {
+    const rows = hourly.map(h => `<tr>
+      <td>${h.hour_index}</td>
+      <td>${fmtNum(h.current_power_kw, 2)}</td>
+      <td>${fmtNum(h.smart_power_kw, 2)}</td>
+      <td>${fmtNum(h.current_cumulative_kwh, 1)}</td>
+      <td>${fmtNum(h.smart_cumulative_kwh, 1)}</td>
+    </tr>`).join('');
+    document.getElementById('simTable').innerHTML = `
+      <thead><tr>
+        <th>Hour</th><th>Current kW</th><th>Smart kW</th><th>Current cum. kWh</th><th>Smart cum. kWh</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>`;
+  }
+
+  // Minimal inline-SVG line/area chart with a hover crosshair + tooltip.
+  // series: [{ key, color }]; mode: 'line' | 'area'.
+  function renderChart(containerId, tooltipId, hourly, series, mode) {
+    const width = 680, height = 240;
+    const padL = 52, padR = 12, padT = 12, padB = 28;
+    const plotW = width - padL - padR;
+    const plotH = height - padT - padB;
+    const n = hourly.length;
+
+    const allValues = series.flatMap(s => hourly.map(h => h[s.key]));
+    const maxY = Math.max(...allValues) * 1.1 || 1;
+    const xAt = i => padL + (n <= 1 ? 0 : (i / (n - 1)) * plotW);
+    const yAt = v => padT + plotH - (v / maxY) * plotH;
+
+    let svg = `<svg viewBox="0 0 ${width} ${height}" width="100%" style="display:block;" role="img" aria-label="chart">`;
+
+    const ticks = 4;
+    for (let t = 0; t <= ticks; t++) {
+      const val = (maxY * t) / ticks;
+      const yy = yAt(val);
+      svg += `<line x1="${padL}" y1="${yy}" x2="${width - padR}" y2="${yy}" stroke="#e6e6e6" stroke-width="1"/>`;
+      svg += `<text x="${padL - 8}" y="${yy + 4}" font-size="10" fill="#666" text-anchor="end">${fmtNum(val, 1)}</text>`;
+    }
+    const xStep = Math.max(24, Math.ceil(n / 8 / 24) * 24);
+    for (let hIdx = 0; hIdx < n; hIdx += xStep) {
+      const xx = xAt(hIdx);
+      svg += `<text x="${xx}" y="${height - padB + 16}" font-size="10" fill="#666" text-anchor="middle">${hIdx}h</text>`;
+    }
+
+    series.forEach(s => {
+      const pts = hourly.map((h, i) => `${xAt(i)},${yAt(h[s.key])}`).join(' ');
+      if (mode === 'area') {
+        const areaPts = `${xAt(0)},${yAt(0)} ${pts} ${xAt(n - 1)},${yAt(0)}`;
+        svg += `<polygon points="${areaPts}" fill="${s.color}" fill-opacity="0.1" stroke="none"/>`;
+      }
+      svg += `<polyline points="${pts}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+    });
+
+    svg += `<line id="${containerId}-crosshair" x1="0" y1="${padT}" x2="0" y2="${height - padB}" stroke="#999" stroke-width="1" style="display:none;"/>`;
+    svg += `<rect x="${padL}" y="${padT}" width="${plotW}" height="${plotH}" fill="transparent" id="${containerId}-hitrect"/>`;
+    svg += `</svg>`;
+
+    const container = document.getElementById(containerId);
+    container.innerHTML = svg;
+
+    const svgEl = container.querySelector('svg');
+    const crosshair = container.querySelector(`#${containerId}-crosshair`);
+    const hitRect = container.querySelector(`#${containerId}-hitrect`);
+    const tooltip = document.getElementById(tooltipId);
+
+    function handleMove(evt) {
+      const rect = svgEl.getBoundingClientRect();
+      const scale = width / rect.width;
+      const localX = (evt.clientX - rect.left) * scale;
+      const frac = Math.min(1, Math.max(0, (localX - padL) / plotW));
+      const idx = Math.round(frac * (n - 1));
+      const h = hourly[idx];
+      if (!h) return;
+
+      const xx = xAt(idx);
+      crosshair.setAttribute('x1', xx);
+      crosshair.setAttribute('x2', xx);
+      crosshair.style.display = 'block';
+
+      tooltip.innerHTML = `Hour ${h.hour_index}<br>` +
+        series.map(s => `<span style="color:${s.color}">●</span> ${fmtNum(h[s.key], 2)}`).join('<br>');
+      tooltip.style.display = 'block';
+      tooltip.style.left = `${(xx / width) * 100}%`;
+      tooltip.style.top = `${((yAt(Math.max(...series.map(s => h[s.key])))) / height) * 100}%`;
+    }
+    function handleLeave() {
+      crosshair.style.display = 'none';
+      tooltip.style.display = 'none';
+    }
+    hitRect.addEventListener('mousemove', handleMove);
+    hitRect.addEventListener('mouseleave', handleLeave);
+  }
+
+  document.getElementById('runSimBtn').addEventListener('click', async () => {
+    const log = document.getElementById('simLog');
+    log.style.display = 'block';
+    log.innerHTML = '';
+
+    const durationHours = Math.max(1, parseInt(document.getElementById('simDuration').value, 10) || 168);
+    const roomSize = document.getElementById('simRoomSize').value;
+    const weatherCondition = document.getElementById('simWeather').value;
+
+    try {
+      const generated = await callFunction('simulation/generate-mock-data', { duration_hours: durationHours, room_size: roomSize });
+      simLogStep(`generated ${generated.occupancy_reading_ids.length} mock occupancy readings`, true);
+
+      const run = await callFunction('simulation/run', { duration_hours: durationHours, room_size: roomSize, weather_condition: weatherCondition });
+      simLogStep(`simulation_run ${run.simulation_run_id} saved (${fmtNum(run.summary.pct_reduction)}% reduction)`, true);
+
+      const hourly = await fetchHourlyData(run.simulation_run_id);
+      simLogStep(`loaded ${hourly.length} hourly rows for charting`, true);
+
+      document.getElementById('simResults').style.display = 'block';
+      renderStats(run.summary);
+      renderChart('simPowerChart', 'simPowerTooltip', hourly,
+        [{ key: 'current_power_kw', color: '#2a78d6' }, { key: 'smart_power_kw', color: '#eb6834' }],
+        'line');
+      renderChart('simEnergyChart', 'simEnergyTooltip', hourly,
+        [{ key: 'current_cumulative_kwh', color: '#2a78d6' }, { key: 'smart_cumulative_kwh', color: '#eb6834' }],
+        'area');
+      renderTable(hourly);
+    } catch (err) {
+      simLogStep(err.message, false);
     }
   });
 

@@ -21,7 +21,7 @@ export const ROOM_SIZE_SQM_RANGES: Record<RoomSize, string> = {
 // has no upper bound, so it uses a representative value past 400). Occupancy
 // density (people ÷ m²) is computed against this, not a stored room area,
 // since MVP doesn't collect an exact square footage per room.
-const ROOM_SIZE_SQM: Record<RoomSize, number> = { small: 100, medium: 275, large: 450 };
+export const ROOM_SIZE_SQM: Record<RoomSize, number> = { small: 100, medium: 275, large: 450 };
 
 // Base temp/fan per mode. Weather adjustments will be layered in once the
 // science team defines the criteria for that.
@@ -51,8 +51,8 @@ const ROOM_SIZE_BTU_MULTIPLIER: Record<RoomSize, number> = { small: 0.7, medium:
 // density instead of an absolute people-count keeps the same crowding
 // standard across room sizes — a person count that's empty in a large room
 // can be packed in a small one.
-const MODERATE_DENSITY = 0.05;
-const FULL_DENSITY = 0.15;
+export const MODERATE_DENSITY = 0.05;
+export const FULL_DENSITY = 0.15;
 
 // Once in "full" mode, more heat load (more people) means the AC needs more
 // cooling capacity to hold the same setpoint — capacity scales further on

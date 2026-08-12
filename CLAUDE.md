@@ -100,17 +100,17 @@ Base BTU/hr is also scaled by a room-size multiplier (small ×0.7, medium ×1.0,
 - Derive power consumption: power_kw = weather-adjusted BTU/hr ÷ (selected SEER × 1000)
 
 **3. Mock Data Generator** (1-2 hours)
-- Create a 168 hour test dataset
-- Compare a static 25 degree test run vs our flucuating system
+- `POST /simulation/generate-mock-data` (`{ duration_hours?, room_size? }`, defaults 168/medium) generates that many hourly `occupancy_readings` rows (`source: 'mock'`), ending at the call time
+- Weekday pattern: peak 9am-5pm and 7pm-11pm (~8-15 people, medium baseline), low other daytime hours (~1-3), near-empty overnight (0-1); weekend flattens daytime to ~40% of the weekday peak; ±15% random noise throughout. Room size scales the whole curve (small ×0.7, medium ×1.0, large ×1.5), mirroring `acCalculation.ts`'s room multiplier
+- Logic lives in `supabase/functions/_shared/simulation.ts` (`generateMockOccupancy`, pure/testable — `now`/`random` are injectable for deterministic tests)
 
 **4. System Simulation & Comparison** (1-2 hours)
-- Run current system (always 25°C, 4.5 kW) for 168 hours
-- Run smart system (variable based on occupancy) for 168 hours
-- Calculate metrics:
-  - Energy used (kWh)
-  - CO₂ emissions (kg)
-  - % reduction
-  - Cost savings (baht)
+- `POST /simulation/run` (`{ duration_hours?, room_size?, ac_seer?, weather_condition? }`, defaults 168/medium/4.5/warm) reads the most recent `duration_hours` mock readings (400s if not enough exist yet — generate mock data first) and compares:
+  - **Current system**: constant 25°C, fan 3, 4.5 kW every hour (`CURRENT_SYSTEM_POWER_KW` in `simulation.ts`)
+  - **Smart system**: `calculateAcSettings` per hour, using the mock reading's people count and a representative outside temp/humidity for `weather_condition` (`hot`/`warm`/`cool` — categorical preset, not a live weatherapi.com call per hour; `warm` reproduces `acCalculation.ts`'s own 33°C/60% baseline)
+- Metrics per CLAUDE.md's "Metrics Calculated" section below (energy, CO₂ at 0.5 kg/kWh, cost at 5 baht/kWh, % reduction)
+- Writes 1 row to `simulation_runs` (summary) + `duration_hours` rows to `simulation_hourly_data` (per-hour breakdown, for the dashboard's line/area graphs)
+- Logic lives in `runSimulation` in `supabase/functions/_shared/simulation.ts` (pure function over an already-fetched people-count array — no DB access, independently testable)
 
 **5. Admin Dashboard Display** (2-3 hours)
 - Show user inputs
