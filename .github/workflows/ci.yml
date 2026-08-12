@@ -40,5 +40,7 @@ jobs:
       - name: Typecheck
         run: |
           for dir in supabase/functions/*/; do
-            (cd "$dir" && deno check --config deno.json index.ts)
+            [ -f "$dir/deno.json" ] && (cd "$dir" && deno check --config deno.json index.ts)
           done
+      - name: Test shared modules
+        run: deno test supabase/functions/_shared/
