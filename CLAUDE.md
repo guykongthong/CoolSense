@@ -100,8 +100,8 @@ Base BTU/hr is also scaled by a room-size multiplier (small ×0.7, medium ×1.0,
 - Derive power consumption: power_kw = weather-adjusted BTU/hr ÷ (selected SEER × 1000)
 
 **3. Mock Data Generator** (1-2 hours)
-- `POST /simulation/generate-mock-data` (`{ duration_hours?, room_size? }`, defaults 168/medium) generates that many hourly `occupancy_readings` rows (`source: 'mock'`), ending at the call time
-- Weekday pattern: peak 9am-5pm and 7pm-11pm (~8-15 people, medium baseline), low other daytime hours (~1-3), near-empty overnight (0-1); weekend flattens daytime to ~40% of the weekday peak; ±15% random noise throughout. Room size scales the whole curve (small ×0.7, medium ×1.0, large ×1.5), mirroring `acCalculation.ts`'s room multiplier
+- `POST /simulation/generate-mock-data` (`{ duration_hours?, room_size? }`, defaults 168/medium) **replaces** any existing `occupancy_readings` rows with `source: 'mock'` (deletes then inserts, so repeated calls don't accumulate overlapping batches) with that many hourly rows ending at the call time
+- Occupancy targets are density-based (people ÷ room m²) against the real `MODERATE_DENSITY`/`FULL_DENSITY` thresholds from `acCalculation.ts`, not flat people-counts — otherwise medium/large rooms never cross into moderate/full mode. Weekday peak (9am-5pm, 7pm-11pm) lands right at the full-mode threshold; low (other daytime) at 40% of the moderate threshold; night (11pm-7am) near-empty; weekend flattens daytime to ~40% of the weekday peak density; ±15% random noise throughout
 - Logic lives in `supabase/functions/_shared/simulation.ts` (`generateMockOccupancy`, pure/testable — `now`/`random` are injectable for deterministic tests)
 
 **4. System Simulation & Comparison** (1-2 hours)
@@ -111,6 +111,12 @@ Base BTU/hr is also scaled by a room-size multiplier (small ×0.7, medium ×1.0,
 - Metrics per CLAUDE.md's "Metrics Calculated" section below (energy, CO₂ at 0.5 kg/kWh, cost at 5 baht/kWh, % reduction)
 - Writes 1 row to `simulation_runs` (summary) + `duration_hours` rows to `simulation_hourly_data` (per-hour breakdown, for the dashboard's line/area graphs)
 - Logic lives in `runSimulation` in `supabase/functions/_shared/simulation.ts` (pure function over an already-fetched people-count array — no DB access, independently testable)
+- The live `/calculation` endpoint excludes `source: 'mock'` readings from its "latest occupancy reading" query, so a simulation run can never transiently hijack a live calculation result
+
+**Dashboard retrieval endpoints** (part of MVP 5, same `simulation` function):
+- `GET /simulation/:id` — single `simulation_runs` row, 404 if not found
+- `GET /simulation/:id/hourly-data` — that run's `simulation_hourly_data` rows ordered by `hour_index`, `[]` if none, 404 if the run itself doesn't exist
+- `GET /simulation/list` — last 10 `simulation_runs`, newest first (summary columns only)
 
 **5. Admin Dashboard Display** (2-3 hours)
 - Show user inputs
@@ -120,6 +126,7 @@ Base BTU/hr is also scaled by a room-size multiplier (small ×0.7, medium ×1.0,
 - Two graphs:
   - Line graph: Power over 200 hours
   - Area chart: Cumulative energy/CO₂
+- `tools/calculation-tester.html` has a working reference implementation of both charts (hand-rolled inline SVG, no external chart library) if useful for the real frontend
 
 ---
 

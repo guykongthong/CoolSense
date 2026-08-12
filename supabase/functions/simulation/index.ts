@@ -11,6 +11,8 @@ const DEFAULT_DURATION_HOURS = 168;
 const DEFAULT_ROOM_SIZE: RoomSize = "medium";
 const DEFAULT_AC_SEER = 4.5;
 const DEFAULT_WEATHER_CONDITION: WeatherCondition = "warm";
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const RECENT_SIMULATIONS_LIMIT = 10;
 
 function isRoomSize(value: unknown): value is RoomSize {
   return typeof value === "string" && VALID_ROOM_SIZES.includes(value);
@@ -196,20 +198,92 @@ async function handleRun(req: Request, ctx: SupabaseContext): Promise<Response> 
   return Response.json({ simulation_run_id: run.id, summary });
 }
 
+async function handleGetRun(id: string, ctx: SupabaseContext): Promise<Response> {
+  // deno-lint-ignore no-explicit-any
+  const db = ctx.supabaseAdmin as any;
+  const { data, error } = await db.from("simulation_runs").select("*").eq("id", id).maybeSingle();
+
+  if (error) {
+    console.error(error.message);
+    return Response.json({ message: error.message }, { status: 500 });
+  }
+  if (!data) {
+    return Response.json({ message: `simulation_runs row not found for id ${id}` }, { status: 404 });
+  }
+  return Response.json(data);
+}
+
+async function handleGetHourlyData(id: string, ctx: SupabaseContext): Promise<Response> {
+  // deno-lint-ignore no-explicit-any
+  const db = ctx.supabaseAdmin as any;
+
+  // 404 the run itself if it doesn't exist, distinct from "run exists but
+  // has no hourly rows yet" which returns [].
+  const { data: run, error: runError } = await db.from("simulation_runs").select("id").eq("id", id).maybeSingle();
+  if (runError) {
+    console.error(runError.message);
+    return Response.json({ message: runError.message }, { status: 500 });
+  }
+  if (!run) {
+    return Response.json({ message: `simulation_runs row not found for id ${id}` }, { status: 404 });
+  }
+
+  const { data, error } = await db
+    .from("simulation_hourly_data")
+    .select("*")
+    .eq("simulation_run_id", id)
+    .order("hour_index", { ascending: true });
+
+  if (error) {
+    console.error(error.message);
+    return Response.json({ message: error.message }, { status: 500 });
+  }
+  return Response.json(data ?? []);
+}
+
+async function handleListSimulations(ctx: SupabaseContext): Promise<Response> {
+  // deno-lint-ignore no-explicit-any
+  const db = ctx.supabaseAdmin as any;
+  const { data, error } = await db
+    .from("simulation_runs")
+    .select("id, duration_hours, pct_reduction, current_energy_kwh, smart_energy_kwh, created_at")
+    .order("created_at", { ascending: false })
+    .limit(RECENT_SIMULATIONS_LIMIT);
+
+  if (error) {
+    console.error(error.message);
+    return Response.json({ message: error.message }, { status: 500 });
+  }
+  return Response.json(data ?? []);
+}
+
 export default {
   fetch: withSupabase({ auth: ["publishable", "secret"] }, async (req, ctx) => {
-    if (req.method !== "POST") {
-      return Response.json({ message: "Method not allowed" }, { status: 405 });
+    const path = new URL(req.url).pathname;
+    const segments = path.split("/").filter(Boolean);
+    const last = segments[segments.length - 1];
+    const secondLast = segments[segments.length - 2];
+
+    if (req.method === "POST") {
+      if (last === "generate-mock-data") return handleGenerateMockData(req, ctx);
+      if (last === "run") return handleRun(req, ctx);
+      return Response.json(
+        { message: "Unknown route — use /simulation/generate-mock-data or /simulation/run" },
+        { status: 404 },
+      );
     }
 
-    const path = new URL(req.url).pathname;
-    if (path.endsWith("/generate-mock-data")) return handleGenerateMockData(req, ctx);
-    if (path.endsWith("/run")) return handleRun(req, ctx);
+    if (req.method === "GET") {
+      if (last === "list") return handleListSimulations(ctx);
+      if (last === "hourly-data" && UUID_RE.test(secondLast ?? "")) return handleGetHourlyData(secondLast, ctx);
+      if (UUID_RE.test(last ?? "")) return handleGetRun(last, ctx);
+      return Response.json(
+        { message: "Unknown route — use GET /simulation/list, /simulation/:id, or /simulation/:id/hourly-data" },
+        { status: 404 },
+      );
+    }
 
-    return Response.json(
-      { message: "Unknown route — use /simulation/generate-mock-data or /simulation/run" },
-      { status: 404 },
-    );
+    return Response.json({ message: "Method not allowed" }, { status: 405 });
   }),
 };
 
@@ -227,5 +301,16 @@ export default {
     --header 'apiKey: sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH' \
     --header 'Content-Type: application/json' \
     --data '{"duration_hours":168,"room_size":"medium","weather_condition":"hot"}'
+
+  3. Then retrieve results using the simulation_run_id from step 2's response:
+
+  curl -i 'http://127.0.0.1:54321/functions/v1/simulation/<simulation_run_id>' \
+    --header 'apiKey: sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH'
+
+  curl -i 'http://127.0.0.1:54321/functions/v1/simulation/<simulation_run_id>/hourly-data' \
+    --header 'apiKey: sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH'
+
+  curl -i 'http://127.0.0.1:54321/functions/v1/simulation/list' \
+    --header 'apiKey: sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH'
 
 */
