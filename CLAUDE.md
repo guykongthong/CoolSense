@@ -16,6 +16,12 @@
 
 **Scope:** Software only, no hardware (only input through camera)
 
+**Tech Stack**
+- Frontend: Vue.js + Typescript
+- Backend: Node.js
+- Database: Supabase
+- Deployment: Vercel
+
 ---
 
 ## How It Works
@@ -65,8 +71,8 @@ Calculate energy (kWh) & CO₂ emissions
 - Compare a static 25 degree test run vs our flucuating system
 
 **4. System Simulation & Comparison** (1-2 hours)
-- Run current system (always 25°C, 4.5 kW) for 200 hours
-- Run smart system (variable based on CO₂) for 200 hours
+- Run current system (always 25°C, 4.5 kW) for 168 hours
+- Run smart system (variable based on CO₂) for 168 hours
 - Calculate metrics:
   - Energy used (kWh)
   - CO₂ emissions (kg)
@@ -126,7 +132,7 @@ Calculate energy (kWh) & CO₂ emissions
 ## Demo Flow
 
 1. **Show problem:**
-   "Hotel AC runs 24/7 at 25°C"
+   "Library AC runs 24/7 at 25°C"
    Display: 900 kWh, 450 kg CO₂
 
 2. **Run your app:**
@@ -217,15 +223,3 @@ For all Thai hotels, that's 158,000 metric tons of CO₂ prevented annually."
 - Demo doesn't crash
 
 ---
-
-## Next Steps
-
-1. Go to Claude Code
-2. Build MVP 1 (input form)
-3. Build MVP 2 (algorithm)
-4. Test both together
-5. Add mock data + comparison
-6. Build dashboard + graphs
-7. Polish + practice pitch
-
-Focus on core. Ship something great.
