@@ -16,6 +16,12 @@ export const ROOM_SIZE_SQM_RANGES: Record<RoomSize, string> = {
   large: "400+ m²",
 };
 
+// Representative m² per room size — the midpoint of each range above (large
+// has no upper bound, so it uses a representative value past 400). Occupancy
+// density (people ÷ m²) is computed against this, not a stored room area,
+// since MVP doesn't collect an exact square footage per room.
+const ROOM_SIZE_SQM: Record<RoomSize, number> = { small: 100, medium: 275, large: 450 };
+
 // Base temp/fan per mode, and base power per mode before the room-size
 // multiplier is applied. Weather adjustments will be layered in once the
 // science team defines the criteria for that.
@@ -29,10 +35,12 @@ const MODE_SETTINGS: Record<AcMode, Omit<AcSettings, "mode">> = {
 // power in a large room than a small one. medium is the 1.0 baseline.
 const ROOM_SIZE_POWER_MULTIPLIER: Record<RoomSize, number> = { small: 0.7, medium: 1.0, large: 1.5 };
 
-// People-count threshold (inclusive lower bound) at which mode escalates,
-// per room size — bigger rooms tolerate more people before stepping up.
-const MODERATE_THRESHOLD: Record<RoomSize, number> = { small: 1, medium: 1, large: 1 };
-const FULL_THRESHOLD: Record<RoomSize, number> = { small: 3, medium: 4, large: 5 };
+// Occupancy density (people ÷ m²) thresholds for mode escalation. Using
+// density instead of an absolute people-count keeps the same crowding
+// standard across room sizes — a person count that's empty in a large room
+// can be packed in a small one.
+const MODERATE_DENSITY = 0.05;
+const FULL_DENSITY = 0.15;
 
 // Once in "full" mode, more heat load (more people) means the AC needs more
 // cooling capacity to hold the same setpoint — power scales further on top
@@ -40,9 +48,14 @@ const FULL_THRESHOLD: Record<RoomSize, number> = { small: 3, medium: 4, large: 5
 // real numbers are available.
 const POWER_PER_EXTRA_PERSON_KW = 0.05;
 
+function getOccupancyDensity(peopleCount: number, roomSize: RoomSize): number {
+  return peopleCount / ROOM_SIZE_SQM[roomSize];
+}
+
 export function getAcMode(peopleCount: number, roomSize: RoomSize): AcMode {
-  if (peopleCount >= FULL_THRESHOLD[roomSize]) return "full";
-  if (peopleCount >= MODERATE_THRESHOLD[roomSize]) return "moderate";
+  const density = getOccupancyDensity(peopleCount, roomSize);
+  if (density >= FULL_DENSITY) return "full";
+  if (density >= MODERATE_DENSITY) return "moderate";
   return "eco";
 }
 
@@ -55,7 +68,8 @@ export function calculateAcSettings(peopleCount: number, roomSize: RoomSize): Ac
     return { mode, temperature_c: base.temperature_c, fan_speed: base.fan_speed, power_kw: basePower };
   }
 
-  const extraPeople = peopleCount - FULL_THRESHOLD[roomSize];
+  const fullThresholdPeople = FULL_DENSITY * ROOM_SIZE_SQM[roomSize];
+  const extraPeople = peopleCount - fullThresholdPeople;
   const power_kw = basePower + extraPeople * POWER_PER_EXTRA_PERSON_KW;
 
   return { mode, temperature_c: base.temperature_c, fan_speed: base.fan_speed, power_kw };

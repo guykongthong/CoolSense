@@ -1,23 +1,28 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import { calculateAcSettings, getAcMode } from "./acCalculation.ts";
 
-Deno.test("small room thresholds", () => {
-  assertEquals(getAcMode(0, "small"), "eco");
-  assertEquals(getAcMode(1, "small"), "moderate");
-  assertEquals(getAcMode(2, "small"), "moderate");
-  assertEquals(getAcMode(3, "small"), "full");
+// Room m² midpoints used for density: small=100, medium=275, large=450.
+// Density thresholds: moderate >= 0.05 people/m², full >= 0.15 people/m².
+
+Deno.test("small room thresholds (100 m²)", () => {
+  assertEquals(getAcMode(4, "small"), "eco"); // 0.04
+  assertEquals(getAcMode(5, "small"), "moderate"); // 0.05
+  assertEquals(getAcMode(14, "small"), "moderate"); // 0.14
+  assertEquals(getAcMode(15, "small"), "full"); // 0.15
 });
 
-Deno.test("medium room thresholds", () => {
-  assertEquals(getAcMode(0, "medium"), "eco");
-  assertEquals(getAcMode(3, "medium"), "moderate");
-  assertEquals(getAcMode(4, "medium"), "full");
+Deno.test("medium room thresholds (275 m²)", () => {
+  assertEquals(getAcMode(13, "medium"), "eco"); // 0.0473
+  assertEquals(getAcMode(14, "medium"), "moderate"); // 0.0509
+  assertEquals(getAcMode(41, "medium"), "moderate"); // 0.1491
+  assertEquals(getAcMode(42, "medium"), "full"); // 0.1527
 });
 
-Deno.test("large room thresholds", () => {
-  assertEquals(getAcMode(0, "large"), "eco");
-  assertEquals(getAcMode(4, "large"), "moderate");
-  assertEquals(getAcMode(5, "large"), "full");
+Deno.test("large room thresholds (450 m²)", () => {
+  assertEquals(getAcMode(22, "large"), "eco"); // 0.0489
+  assertEquals(getAcMode(23, "large"), "moderate"); // 0.0511
+  assertEquals(getAcMode(67, "large"), "moderate"); // 0.1489
+  assertEquals(getAcMode(68, "large"), "full"); // 0.1511
 });
 
 Deno.test("calculateAcSettings returns base settings for eco/moderate", () => {
@@ -27,7 +32,7 @@ Deno.test("calculateAcSettings returns base settings for eco/moderate", () => {
     fan_speed: 1,
     power_kw: 0.5,
   });
-  assertEquals(calculateAcSettings(1, "medium"), {
+  assertEquals(calculateAcSettings(14, "medium"), {
     mode: "moderate",
     temperature_c: 24,
     fan_speed: 2,
@@ -42,27 +47,27 @@ Deno.test("calculateAcSettings applies the room-size power multiplier", () => {
 });
 
 Deno.test("calculateAcSettings holds temp/fan but scales power in full mode", () => {
-  // small room: full threshold is 3 people, base power = 4.5 * 0.7 = 3.15
-  assertEquals(calculateAcSettings(3, "small"), {
+  // small room: full density threshold is 15 people (0.15 * 100), base power = 4.5 * 0.7 = 3.15
+  assertEquals(calculateAcSettings(15, "small"), {
     mode: "full",
     temperature_c: 21,
     fan_speed: 3,
     power_kw: 3.15,
   });
-  assertEquals(calculateAcSettings(10, "small"), {
+  assertEquals(calculateAcSettings(20, "small"), {
     mode: "full",
     temperature_c: 21,
     fan_speed: 3,
-    power_kw: 3.5, // 3.15 + (10 - 3) * 0.05
+    power_kw: 3.4, // 3.15 + (20 - 15) * 0.05
   });
 });
 
 Deno.test("calculateAcSettings scales power for library-sized crowds", () => {
-  // large room: full threshold is 5 people, base power = 4.5 * 1.5 = 6.75
+  // large room: full density threshold is 67.5 people (0.15 * 450), base power = 4.5 * 1.5 = 6.75
   assertEquals(calculateAcSettings(100, "large"), {
     mode: "full",
     temperature_c: 21,
     fan_speed: 3,
-    power_kw: 11.5, // 6.75 + (100 - 5) * 0.05
+    power_kw: 8.375, // 6.75 + (100 - 67.5) * 0.05
   });
 });

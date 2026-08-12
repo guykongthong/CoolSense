@@ -6,12 +6,13 @@
 <style>
   body {
     font-family: system-ui, sans-serif;
-    max-width: 480px;
+    max-width: 720px;
     margin: 40px auto;
     padding: 0 16px;
     color: #1a1a1a;
   }
   h1 { font-size: 1.25rem; }
+  h2 { font-size: 1rem; margin: 0 0 4px; }
   .field { margin-bottom: 16px; }
   label { display: block; margin-bottom: 4px; font-weight: 600; }
   input, select {
@@ -38,15 +39,59 @@
   .metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
   .metric-label { font-size: 0.8rem; color: #555; }
   .metric-value { font-size: 1.2rem; font-weight: 600; }
+
+  .criteria {
+    margin-top: 32px;
+    border-top: 2px solid #ddd;
+    padding-top: 16px;
+  }
+  .criteria-note {
+    background: #fff8e1;
+    border: 1px solid #ffe082;
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-size: 0.85rem;
+    margin-bottom: 16px;
+  }
+  .criteria-note.dirty {
+    background: #ffebee;
+    border-color: #ef9a9a;
+  }
+  fieldset {
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    margin-bottom: 16px;
+    padding: 12px;
+  }
+  legend { font-weight: 600; padding: 0 4px; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .grid3 .field { margin-bottom: 0; }
+  .grid3 label { font-weight: 400; font-size: 0.8rem; }
+  .mode-row { display: grid; grid-template-columns: 90px repeat(3, 1fr); gap: 10px; align-items: end; margin-bottom: 10px; }
+  .mode-row .mode-name { font-weight: 600; padding-bottom: 8px; text-transform: capitalize; }
+  .mode-row label { font-weight: 400; font-size: 0.75rem; }
+  .criteria-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+  .criteria-actions button { font-size: 0.85rem; padding: 8px 12px; }
+  #resetBtn { background: #fff; border: 1px solid #bbb; }
+  #exportBtn { background: #fff; border: 1px solid #bbb; }
+  textarea#exportOutput {
+    width: 100%;
+    min-height: 220px;
+    font-family: ui-monospace, monospace;
+    font-size: 0.8rem;
+    margin-top: 10px;
+    display: none;
+    box-sizing: border-box;
+  }
 </style>
 </head>
 <body>
   <h1>AC Calculation Tester</h1>
-  <p>Mirrors <code>supabase/functions/_shared/acCalculation.ts</code> for quick local testing without needing Docker/Supabase running. Keep the thresholds in sync if that file changes.</p>
+  <p>Mirrors <code>supabase/functions/_shared/acCalculation.ts</code> for quick local testing without needing Docker/Supabase running.</p>
 
   <div class="field">
     <label for="people">People in room</label>
-    <input id="people" type="number" min="0" value="0" />
+    <input id="people" type="number" min="0" max="100" value="0" />
   </div>
 
   <div class="field">
@@ -82,39 +127,189 @@
     </div>
   </div>
 
+  <div class="criteria">
+    <h2>Criteria (editable)</h2>
+    <div id="criteriaNote" class="criteria-note">
+      The science team hasn't finalized the occupancy/power criteria yet. Edit the numbers below to
+      experiment — they recalculate live and persist in this browser only. Nothing here changes
+      <code>acCalculation.ts</code>; once the science team locks in final numbers, use
+      <strong>Export as code</strong> below and hand the snippet to whoever updates the source file.
+    </div>
+
+    <fieldset>
+      <legend>Room size → m²</legend>
+      <div class="grid3">
+        <div class="field"><label for="sqmSmall">Small</label><input id="sqmSmall" type="number" min="1" step="1" /></div>
+        <div class="field"><label for="sqmMedium">Medium</label><input id="sqmMedium" type="number" min="1" step="1" /></div>
+        <div class="field"><label for="sqmLarge">Large</label><input id="sqmLarge" type="number" min="1" step="1" /></div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Occupancy density thresholds (people ÷ m²)</legend>
+      <div class="grid3">
+        <div class="field"><label for="densityModerate">Moderate at ≥</label><input id="densityModerate" type="number" min="0" step="0.001" /></div>
+        <div class="field"><label for="densityFull">Full at ≥</label><input id="densityFull" type="number" min="0" step="0.001" /></div>
+        <div class="field"><label for="powerPerExtra">Power per extra person in full (kW)</label><input id="powerPerExtra" type="number" min="0" step="0.001" /></div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Room size power multiplier</legend>
+      <div class="grid3">
+        <div class="field"><label for="multSmall">Small</label><input id="multSmall" type="number" min="0" step="0.05" /></div>
+        <div class="field"><label for="multMedium">Medium</label><input id="multMedium" type="number" min="0" step="0.05" /></div>
+        <div class="field"><label for="multLarge">Large</label><input id="multLarge" type="number" min="0" step="0.05" /></div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Mode base settings</legend>
+      <div class="mode-row">
+        <div></div>
+        <label>Temperature (°C)</label>
+        <label>Fan speed</label>
+        <label>Base power (kW)</label>
+      </div>
+      <div class="mode-row">
+        <div class="mode-name">Eco</div>
+        <input id="ecoTemp" type="number" step="1" />
+        <input id="ecoFan" type="number" min="1" step="1" />
+        <input id="ecoPower" type="number" min="0" step="0.1" />
+      </div>
+      <div class="mode-row">
+        <div class="mode-name">Moderate</div>
+        <input id="moderateTemp" type="number" step="1" />
+        <input id="moderateFan" type="number" min="1" step="1" />
+        <input id="moderatePower" type="number" min="0" step="0.1" />
+      </div>
+      <div class="mode-row">
+        <div class="mode-name">Full</div>
+        <input id="fullTemp" type="number" step="1" />
+        <input id="fullFan" type="number" min="1" step="1" />
+        <input id="fullPower" type="number" min="0" step="0.1" />
+      </div>
+    </fieldset>
+
+    <div class="criteria-actions">
+      <button id="resetBtn">Reset to code defaults</button>
+      <button id="exportBtn">Export as code</button>
+    </div>
+    <textarea id="exportOutput" readonly></textarea>
+  </div>
+
 <script>
-  // Mirrors supabase/functions/_shared/acCalculation.ts
-  const MODE_SETTINGS = {
-    eco: { temperature_c: 28, fan_speed: 1, power_kw: 0.5 },
-    moderate: { temperature_c: 24, fan_speed: 2, power_kw: 2.5 },
-    full: { temperature_c: 21, fan_speed: 3, power_kw: 4.5 },
+  // Defaults mirror supabase/functions/_shared/acCalculation.ts as of the last sync.
+  // These are the fallback/reset values, NOT necessarily the science team's final criteria.
+  const DEFAULT_CRITERIA = {
+    roomSizeSqm: { small: 100, medium: 275, large: 450 },
+    densityModerate: 0.05,
+    densityFull: 0.15,
+    powerPerExtraPersonKw: 0.05,
+    roomSizePowerMultiplier: { small: 0.7, medium: 1.0, large: 1.5 },
+    modeSettings: {
+      eco: { temperature_c: 28, fan_speed: 1, power_kw: 0.5 },
+      moderate: { temperature_c: 24, fan_speed: 2, power_kw: 2.5 },
+      full: { temperature_c: 21, fan_speed: 3, power_kw: 4.5 },
+    },
   };
-  const MODERATE_THRESHOLD = { small: 1, medium: 1, large: 1 };
-  const FULL_THRESHOLD = { small: 3, medium: 4, large: 5 };
-  const ROOM_SIZE_POWER_MULTIPLIER = { small: 0.7, medium: 1.0, large: 1.5 };
-  const POWER_PER_EXTRA_PERSON_KW = 0.05;
+
+  const STORAGE_KEY = 'ac-calc-tester-criteria-v1';
+
+  function loadCriteria() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return { criteria: structuredClone(DEFAULT_CRITERIA), dirty: false };
+      return { criteria: JSON.parse(raw), dirty: true };
+    } catch {
+      return { criteria: structuredClone(DEFAULT_CRITERIA), dirty: false };
+    }
+  }
+
+  function saveCriteria(criteria) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(criteria));
+  }
+
+  let { criteria, dirty } = loadCriteria();
+
+  const fields = {
+    sqmSmall: ['roomSizeSqm', 'small'],
+    sqmMedium: ['roomSizeSqm', 'medium'],
+    sqmLarge: ['roomSizeSqm', 'large'],
+    densityModerate: ['densityModerate'],
+    densityFull: ['densityFull'],
+    powerPerExtra: ['powerPerExtraPersonKw'],
+    multSmall: ['roomSizePowerMultiplier', 'small'],
+    multMedium: ['roomSizePowerMultiplier', 'medium'],
+    multLarge: ['roomSizePowerMultiplier', 'large'],
+    ecoTemp: ['modeSettings', 'eco', 'temperature_c'],
+    ecoFan: ['modeSettings', 'eco', 'fan_speed'],
+    ecoPower: ['modeSettings', 'eco', 'power_kw'],
+    moderateTemp: ['modeSettings', 'moderate', 'temperature_c'],
+    moderateFan: ['modeSettings', 'moderate', 'fan_speed'],
+    moderatePower: ['modeSettings', 'moderate', 'power_kw'],
+    fullTemp: ['modeSettings', 'full', 'temperature_c'],
+    fullFan: ['modeSettings', 'full', 'fan_speed'],
+    fullPower: ['modeSettings', 'full', 'power_kw'],
+  };
+
+  function getPath(obj, path) {
+    return path.reduce((o, k) => o[k], obj);
+  }
+  function setPath(obj, path, value) {
+    const last = path[path.length - 1];
+    const parent = path.slice(0, -1).reduce((o, k) => o[k], obj);
+    parent[last] = value;
+  }
+
+  function populateInputs() {
+    for (const [id, path] of Object.entries(fields)) {
+      document.getElementById(id).value = getPath(criteria, path);
+    }
+    updateDirtyNote();
+  }
+
+  function updateDirtyNote() {
+    document.getElementById('criteriaNote').classList.toggle('dirty', dirty);
+  }
+
+  function readInputsIntoCriteria() {
+    for (const [id, path] of Object.entries(fields)) {
+      const val = parseFloat(document.getElementById(id).value);
+      setPath(criteria, path, Number.isFinite(val) ? val : getPath(criteria, path));
+    }
+    dirty = JSON.stringify(criteria) !== JSON.stringify(DEFAULT_CRITERIA);
+    saveCriteria(criteria);
+    updateDirtyNote();
+  }
+
+  function getOccupancyDensity(peopleCount, roomSize) {
+    return peopleCount / criteria.roomSizeSqm[roomSize];
+  }
 
   function getAcMode(peopleCount, roomSize) {
-    if (peopleCount >= FULL_THRESHOLD[roomSize]) return 'full';
-    if (peopleCount >= MODERATE_THRESHOLD[roomSize]) return 'moderate';
+    const density = getOccupancyDensity(peopleCount, roomSize);
+    if (density >= criteria.densityFull) return 'full';
+    if (density >= criteria.densityModerate) return 'moderate';
     return 'eco';
   }
 
   function calculateAcSettings(peopleCount, roomSize) {
     const mode = getAcMode(peopleCount, roomSize);
-    const base = MODE_SETTINGS[mode];
-    const basePower = base.power_kw * ROOM_SIZE_POWER_MULTIPLIER[roomSize];
+    const base = criteria.modeSettings[mode];
+    const basePower = base.power_kw * criteria.roomSizePowerMultiplier[roomSize];
 
     if (mode !== 'full') {
       return { mode, temperature_c: base.temperature_c, fan_speed: base.fan_speed, power_kw: basePower };
     }
 
-    const extraPeople = peopleCount - FULL_THRESHOLD[roomSize];
-    const power_kw = basePower + extraPeople * POWER_PER_EXTRA_PERSON_KW;
+    const fullThresholdPeople = criteria.densityFull * criteria.roomSizeSqm[roomSize];
+    const extraPeople = peopleCount - fullThresholdPeople;
+    const power_kw = basePower + extraPeople * criteria.powerPerExtraPersonKw;
     return { mode, temperature_c: base.temperature_c, fan_speed: base.fan_speed, power_kw };
   }
 
-  document.getElementById('calc').addEventListener('click', () => {
+  function runCalculation() {
     const people = Math.max(0, parseInt(document.getElementById('people').value, 10) || 0);
     const roomSize = document.getElementById('roomSize').value;
     const settings = calculateAcSettings(people, roomSize);
@@ -128,7 +323,49 @@
     document.getElementById('fanValue').textContent = 'Fan ' + settings.fan_speed;
     document.getElementById('powerValue').textContent = settings.power_kw.toFixed(2) + ' kW';
     document.getElementById('inputSummary').textContent = people + ' / ' + roomSize;
+  }
+
+  document.getElementById('calc').addEventListener('click', runCalculation);
+
+  for (const id of Object.keys(fields)) {
+    document.getElementById(id).addEventListener('input', () => {
+      readInputsIntoCriteria();
+      runCalculation();
+    });
+  }
+
+  document.getElementById('resetBtn').addEventListener('click', () => {
+    criteria = structuredClone(DEFAULT_CRITERIA);
+    dirty = false;
+    localStorage.removeItem(STORAGE_KEY);
+    populateInputs();
+    runCalculation();
   });
+
+  document.getElementById('exportBtn').addEventListener('click', () => {
+    const c = criteria;
+    const snippet = `// Paste into supabase/functions/_shared/acCalculation.ts (and mirror in this file's DEFAULT_CRITERIA)
+const MODE_SETTINGS: Record<AcMode, Omit<AcSettings, "mode">> = {
+  eco: { temperature_c: ${c.modeSettings.eco.temperature_c}, fan_speed: ${c.modeSettings.eco.fan_speed}, power_kw: ${c.modeSettings.eco.power_kw} },
+  moderate: { temperature_c: ${c.modeSettings.moderate.temperature_c}, fan_speed: ${c.modeSettings.moderate.fan_speed}, power_kw: ${c.modeSettings.moderate.power_kw} },
+  full: { temperature_c: ${c.modeSettings.full.temperature_c}, fan_speed: ${c.modeSettings.full.fan_speed}, power_kw: ${c.modeSettings.full.power_kw} },
+};
+
+const ROOM_SIZE_SQM: Record<RoomSize, number> = { small: ${c.roomSizeSqm.small}, medium: ${c.roomSizeSqm.medium}, large: ${c.roomSizeSqm.large} };
+const ROOM_SIZE_POWER_MULTIPLIER: Record<RoomSize, number> = { small: ${c.roomSizePowerMultiplier.small}, medium: ${c.roomSizePowerMultiplier.medium}, large: ${c.roomSizePowerMultiplier.large} };
+
+const MODERATE_DENSITY = ${c.densityModerate};
+const FULL_DENSITY = ${c.densityFull};
+const POWER_PER_EXTRA_PERSON_KW = ${c.powerPerExtraPersonKw};
+`;
+    const output = document.getElementById('exportOutput');
+    output.style.display = 'block';
+    output.value = snippet;
+    output.select();
+  });
+
+  populateInputs();
+  runCalculation();
 </script>
 </body>
 </html>
