@@ -1,6 +1,6 @@
 import { assertAlmostEquals, assertEquals } from "jsr:@std/assert@1";
 import { calculateAcSettings, getAcMode, type RoomSize } from "./acCalculation.ts";
-import { CURRENT_SYSTEM_POWER_KW, generateMockOccupancy, runSimulation } from "./simulation.ts";
+import { CURRENT_SYSTEM_POWER_KW, generateMockOccupancy, getDiurnalWeather, runSimulation } from "./simulation.ts";
 
 const noRandom = () => 0.5; // random()*2-1 = 0 → no noise
 const minRandom = () => 0; // noise = -15%
@@ -161,4 +161,51 @@ Deno.test("runSimulation: empty input produces a zeroed-out summary, not a crash
   assertEquals(summary.duration_hours, 0);
   assertEquals(summary.current_energy_kwh, 0);
   assertEquals(summary.pct_reduction, 0); // guarded against divide-by-zero
+});
+
+Deno.test("getDiurnalWeather: peak hour (3pm) matches the hot-midday anchor", () => {
+  const w = getDiurnalWeather(new Date(2026, 7, 10, 15, 0, 0));
+  assertAlmostEquals(w.tempC, 36, 1e-9);
+  assertAlmostEquals(w.humidityPct, 80, 1e-9);
+});
+
+Deno.test("getDiurnalWeather: trough hour (3am) matches the cool-morning anchor", () => {
+  const w = getDiurnalWeather(new Date(2026, 7, 10, 3, 0, 0));
+  assertAlmostEquals(w.tempC, 27, 1e-9);
+  assertAlmostEquals(w.humidityPct, 50, 1e-9);
+});
+
+Deno.test("getDiurnalWeather: stays within [trough, peak] across every hour of the day", () => {
+  for (let hour = 0; hour < 24; hour++) {
+    const w = getDiurnalWeather(new Date(2026, 7, 10, hour, 0, 0));
+    assertEquals(w.tempC >= 27 && w.tempC <= 36, true, `hour ${hour} tempC=${w.tempC}`);
+    assertEquals(w.humidityPct >= 50 && w.humidityPct <= 80, true, `hour ${hour} humidityPct=${w.humidityPct}`);
+  }
+});
+
+Deno.test("runSimulation: diurnal weather requires capturedAt timestamps", () => {
+  let threw = false;
+  try {
+    runSimulation([10], "medium", 4.5, "diurnal");
+  } catch {
+    threw = true;
+  }
+  assertEquals(threw, true);
+});
+
+Deno.test("runSimulation: diurnal weather varies smart_power_kw by time of day even at constant occupancy", () => {
+  const peopleCounts = [40, 40]; // same occupancy both hours — only weather differs
+  const capturedAt = [new Date(2026, 7, 10, 3, 0, 0), new Date(2026, 7, 10, 15, 0, 0)]; // trough, then peak
+  const { hourly } = runSimulation(peopleCounts, "medium", 4.5, "diurnal", capturedAt);
+  assertEquals(hourly[0].smart_power_kw < hourly[1].smart_power_kw, true);
+});
+
+Deno.test("runSimulation: diurnal weather at the exact peak/trough hours matches calculateAcSettings directly", () => {
+  const peopleCounts = [40, 40];
+  const capturedAt = [new Date(2026, 7, 10, 3, 0, 0), new Date(2026, 7, 10, 15, 0, 0)];
+  const { hourly } = runSimulation(peopleCounts, "medium", 4.5, "diurnal", capturedAt);
+  const trough = calculateAcSettings(40, "medium", 4.5, 27, 50);
+  const peak = calculateAcSettings(40, "medium", 4.5, 36, 80);
+  assertAlmostEquals(hourly[0].smart_power_kw, trough.power_kw, 1e-9);
+  assertAlmostEquals(hourly[1].smart_power_kw, peak.power_kw, 1e-9);
 });

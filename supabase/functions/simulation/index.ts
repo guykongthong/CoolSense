@@ -6,7 +6,7 @@ import { type RoomSize } from "../_shared/acCalculation.ts";
 import { generateMockOccupancy, runSimulation, type WeatherCondition } from "../_shared/simulation.ts";
 
 const VALID_ROOM_SIZES = ["small", "medium", "large"];
-const VALID_WEATHER_CONDITIONS = ["hot", "warm", "cool"];
+const VALID_WEATHER_CONDITIONS = ["hot", "warm", "cool", "diurnal"];
 const DEFAULT_DURATION_HOURS = 168;
 const DEFAULT_ROOM_SIZE: RoomSize = "medium";
 const DEFAULT_AC_SEER = 4.5;
@@ -160,12 +160,11 @@ async function handleRun(req: Request, ctx: SupabaseContext): Promise<Response> 
   }
 
   // DB returned newest-first; simulate oldest-first (hour 0 = oldest).
-  const peopleCounts = (readings as OccupancyReadingRow[])
-    .slice()
-    .reverse()
-    .map((r) => r.people_count);
+  const orderedReadings = (readings as OccupancyReadingRow[]).slice().reverse();
+  const peopleCounts = orderedReadings.map((r) => r.people_count);
+  const capturedAt = orderedReadings.map((r) => new Date(r.captured_at));
 
-  const { hourly, summary } = runSimulation(peopleCounts, roomSize, acSeer, weatherCondition);
+  const { hourly, summary } = runSimulation(peopleCounts, roomSize, acSeer, weatherCondition, capturedAt);
 
   const { data: run, error: runError } = await db
     .from("simulation_runs")

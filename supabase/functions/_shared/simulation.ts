@@ -1,6 +1,6 @@
 import { calculateAcSettings, FULL_DENSITY, MODERATE_DENSITY, ROOM_SIZE_SQM, type RoomSize } from "./acCalculation.ts";
 
-export type WeatherCondition = "hot" | "warm" | "cool";
+export type WeatherCondition = "hot" | "warm" | "cool" | "diurnal";
 
 export interface MockReading {
   captured_at: string;
@@ -41,11 +41,41 @@ const COST_PER_KWH_BAHT = 5;
 // for scenario simulation where hitting weatherapi.com 168 times per run
 // isn't practical. "warm" reproduces acCalculation.ts's own baseline (33°C/
 // 60% RH → multiplier 1), so it's the closest thing to "no adjustment".
-const WEATHER_CONDITION_PRESETS: Record<WeatherCondition, { tempC: number; humidityPct: number }> = {
+const WEATHER_CONDITION_PRESETS: Record<Exclude<WeatherCondition, "diurnal">, { tempC: number; humidityPct: number }> = {
   cool: { tempC: 27, humidityPct: 55 },
   warm: { tempC: 33, humidityPct: 60 },
   hot: { tempC: 38, humidityPct: 75 },
 };
+
+// A continuous day/night cycle instead of one flat value for the whole run —
+// "warm" and "hot" both sit at/above acCalculation.ts's own weather
+// baseline (33°C/60%), so with a flat preset the hybrid model's setpoint
+// relaxation never has mild-enough conditions to fire and it collapses to
+// identical numbers as the current model for the entire simulation. Cosine
+// curve, 24h period: temp/humidity trough at 3am, peak at 3pm — anchored to
+// the peer's example figures (cool morning ~27°C/50%, hot midday ~36°C/80%).
+const DIURNAL_PEAK_HOUR = 15;
+const DIURNAL_MID_TEMP_C = 31.5;
+const DIURNAL_TEMP_AMPLITUDE_C = 4.5; // → 27°C trough / 36°C peak
+const DIURNAL_MID_HUMIDITY_PCT = 65;
+const DIURNAL_HUMIDITY_AMPLITUDE_PCT = 15; // → 50% trough / 80% peak
+
+export function getDiurnalWeather(timestamp: Date): { tempC: number; humidityPct: number } {
+  const hour = timestamp.getHours() + timestamp.getMinutes() / 60;
+  const phase = (2 * Math.PI * (hour - DIURNAL_PEAK_HOUR)) / 24;
+  return {
+    tempC: DIURNAL_MID_TEMP_C + DIURNAL_TEMP_AMPLITUDE_C * Math.cos(phase),
+    humidityPct: DIURNAL_MID_HUMIDITY_PCT + DIURNAL_HUMIDITY_AMPLITUDE_PCT * Math.cos(phase),
+  };
+}
+
+function getWeatherForHour(weatherCondition: WeatherCondition, timestamp: Date | undefined): { tempC: number; humidityPct: number } {
+  if (weatherCondition === "diurnal") {
+    if (!timestamp) throw new Error("diurnal weather_condition requires capturedAt timestamps");
+    return getDiurnalWeather(timestamp);
+  }
+  return WEATHER_CONDITION_PRESETS[weatherCondition];
+}
 
 // Occupancy targets are expressed as density (people ÷ m²) and converted to
 // a people-count via ROOM_SIZE_SQM — the same density the mode thresholds
@@ -128,15 +158,16 @@ export function generateMockOccupancy(
  * Runs the current-vs-smart comparison over a sequence of hourly people
  * counts (oldest first). Pure function over already-fetched data — no DB
  * access — so it's independently testable and reusable regardless of where
- * the readings came from.
+ * the readings came from. `capturedAt` (same order/length as `peopleCounts`)
+ * is only required when weatherCondition is "diurnal".
  */
 export function runSimulation(
   peopleCounts: number[],
   roomSize: RoomSize,
   seer: number,
   weatherCondition: WeatherCondition,
+  capturedAt?: Date[],
 ): { hourly: SimulationHourResult[]; summary: SimulationSummary } {
-  const preset = WEATHER_CONDITION_PRESETS[weatherCondition];
   const hourly: SimulationHourResult[] = [];
 
   let currentCumulativeKwh = 0;
@@ -145,7 +176,8 @@ export function runSimulation(
   let smartCumulativeCo2 = 0;
 
   peopleCounts.forEach((peopleCount, hour_index) => {
-    const smartSettings = calculateAcSettings(peopleCount, roomSize, seer, preset.tempC, preset.humidityPct);
+    const weather = getWeatherForHour(weatherCondition, capturedAt?.[hour_index]);
+    const smartSettings = calculateAcSettings(peopleCount, roomSize, seer, weather.tempC, weather.humidityPct);
 
     // Power (kW) sustained for a 1-hour slice == energy (kWh) for that hour.
     currentCumulativeKwh += CURRENT_SYSTEM_POWER_KW;

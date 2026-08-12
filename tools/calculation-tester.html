@@ -319,9 +319,10 @@
       <div class="field">
         <label for="simWeather">Weather condition</label>
         <select id="simWeather">
-          <option value="cool">Cool</option>
-          <option value="warm" selected>Warm</option>
-          <option value="hot">Hot</option>
+          <option value="diurnal" selected>Diurnal (realistic day/night cycle)</option>
+          <option value="cool">Cool (flat 27°C/55%)</option>
+          <option value="warm">Warm (flat 33°C/60% — hybrid model's own baseline, so it never diverges from the current model here)</option>
+          <option value="hot">Hot (flat 38°C/75%)</option>
         </select>
       </div>
     </div>
@@ -745,7 +746,8 @@
     const res = await fetch(url, { headers: { apiKey, Authorization: `Bearer ${apiKey}` } });
     if (!res.ok) throw new Error(`fetching occupancy_readings → HTTP ${res.status}`);
     const rows = await res.json();
-    return rows.slice().reverse().map(r => r.people_count); // oldest-first, matching hour_index order
+    const ordered = rows.slice().reverse(); // oldest-first, matching hour_index order
+    return { peopleCounts: ordered.map(r => r.people_count), capturedAt: ordered.map(r => new Date(r.captured_at)) };
   }
 
   // ---- Hybrid model: same mode/BTU/SEER logic as calculateAcSettings,
@@ -769,6 +771,28 @@
     hot: { tempC: 38, humidityPct: 75 },
   };
 
+  // Continuous day/night cycle — mirrors simulation.ts's getDiurnalWeather.
+  // 24h cosine, trough at 3am (27°C/50%), peak at 3pm (36°C/80%).
+  const DIURNAL_PEAK_HOUR = 15;
+  const DIURNAL_MID_TEMP_C = 31.5;
+  const DIURNAL_TEMP_AMPLITUDE_C = 4.5;
+  const DIURNAL_MID_HUMIDITY_PCT = 65;
+  const DIURNAL_HUMIDITY_AMPLITUDE_PCT = 15;
+
+  function getDiurnalWeather(timestamp) {
+    const hour = timestamp.getHours() + timestamp.getMinutes() / 60;
+    const phase = (2 * Math.PI * (hour - DIURNAL_PEAK_HOUR)) / 24;
+    return {
+      tempC: DIURNAL_MID_TEMP_C + DIURNAL_TEMP_AMPLITUDE_C * Math.cos(phase),
+      humidityPct: DIURNAL_MID_HUMIDITY_PCT + DIURNAL_HUMIDITY_AMPLITUDE_PCT * Math.cos(phase),
+    };
+  }
+
+  function getWeatherForHour(weatherCondition, timestamp) {
+    if (weatherCondition === 'diurnal') return getDiurnalWeather(timestamp);
+    return WEATHER_CONDITION_PRESETS[weatherCondition];
+  }
+
   function calculateHybridSettings(peopleCount, roomSize, seer, outsideTempC, humidityPct) {
     const base = calculateAcSettings(peopleCount, roomSize, seer, outsideTempC, humidityPct);
     const range = HYBRID_MODE_TEMP_RANGE[base.mode];
@@ -786,11 +810,11 @@
     return { mode: base.mode, fan_speed: base.fan_speed, base_temp_c: base.temperature_c, adjusted_temp_c, power_kw, btu_per_hr };
   }
 
-  function computeHybridHourly(peopleCounts, roomSize, seer, weatherCondition) {
-    const preset = WEATHER_CONDITION_PRESETS[weatherCondition];
+  function computeHybridHourly(peopleCounts, roomSize, seer, weatherCondition, capturedAt) {
     let cumKwh = 0, cumCo2 = 0;
     return peopleCounts.map((people, hour_index) => {
-      const s = calculateHybridSettings(people, roomSize, seer, preset.tempC, preset.humidityPct);
+      const weather = getWeatherForHour(weatherCondition, capturedAt[hour_index]);
+      const s = calculateHybridSettings(people, roomSize, seer, weather.tempC, weather.humidityPct);
       cumKwh += s.power_kw;
       cumCo2 = cumKwh * 0.5;
       return {
@@ -948,10 +972,10 @@
       const hourly = await fetchHourlyData(run.simulation_run_id);
       simLogStep(`loaded ${hourly.length} hourly rows for charting`, true);
 
-      const peopleCounts = await fetchMockOccupancy(durationHours);
+      const { peopleCounts, capturedAt } = await fetchMockOccupancy(durationHours);
       const seer = 4.5; // matches the "Keep SEER at 4.5" spec for this comparison
-      const hybridHourly = computeHybridHourly(peopleCounts, roomSize, seer, weatherCondition);
-      simLogStep(`computed hybrid model for ${hybridHourly.length} hours (client-side)`, true);
+      const hybridHourly = computeHybridHourly(peopleCounts, roomSize, seer, weatherCondition, capturedAt);
+      simLogStep(`computed hybrid model for ${hybridHourly.length} hours (client-side, weather: ${weatherCondition})`, true);
 
       const merged = hourly.map((h, i) => ({ ...h, ...(hybridHourly[i] ?? {}) }));
       const hybridEnergyKwh = hybridHourly.length ? hybridHourly[hybridHourly.length - 1].hybrid_cumulative_kwh : 0;
