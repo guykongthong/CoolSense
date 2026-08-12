@@ -47,6 +47,18 @@ async function handleGenerateMockData(req: Request, ctx: SupabaseContext): Promi
 
   // deno-lint-ignore no-explicit-any
   const db = ctx.supabaseAdmin as any;
+
+  // Replace, not append — otherwise repeated calls (different durations,
+  // different runs while testing) pile up in the table, and /run's "most
+  // recent N mock rows" ends up mixing rows from multiple overlapping
+  // batches instead of one coherent scenario. Scoped to source='mock' only,
+  // never touches real ml_video/manual readings.
+  const { error: deleteError } = await db.from("occupancy_readings").delete().eq("source", "mock");
+  if (deleteError) {
+    console.error(deleteError.message);
+    return Response.json({ message: deleteError.message }, { status: 500 });
+  }
+
   const { data, error } = await db.from("occupancy_readings").insert(readings).select("id, captured_at, people_count");
 
   if (error) {
