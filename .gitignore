@@ -1,0 +1,12 @@
+# Env files
+.env
+.env.*
+!.env.example
+
+# OS files
+.DS_Store
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea
