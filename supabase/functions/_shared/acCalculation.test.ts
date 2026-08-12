@@ -110,3 +110,34 @@ Deno.test("calculateAcSettings keeps required BTU/hr constant across SEER — on
   assertEquals(standard.power_kw, 3.4); // 15300 / 4500
   assertEquals(highEfficiency.power_kw, 1.7); // 15300 / 9000
 });
+
+Deno.test("calculateAcSettings defaults to baseline weather (33°C, 60% RH) when omitted — unchanged", () => {
+  assertEquals(calculateAcSettings(0, "medium").btu_per_hr, 2250);
+  assertEquals(calculateAcSettings(0, "medium", 4.5, 33, 60).btu_per_hr, 2250);
+});
+
+Deno.test("calculateAcSettings raises required BTU/hr for hotter-than-baseline outside temp", () => {
+  // 43°C is 10° above the 33° baseline → +2%/°C = 1.2x
+  const settings = calculateAcSettings(0, "medium", 4.5, 43, 60);
+  assertEquals(settings.btu_per_hr, 2700); // 2250 * 1.2
+  assertEquals(settings.power_kw, 0.6);
+});
+
+Deno.test("calculateAcSettings raises required BTU/hr for higher-than-baseline humidity", () => {
+  // 90% RH is 30 points above the 60% baseline → +0.3%/point = 1.09x
+  const settings = calculateAcSettings(0, "medium", 4.5, 33, 90);
+  assertEquals(settings.btu_per_hr, 2452.5); // 2250 * 1.09
+});
+
+Deno.test("calculateAcSettings combines temperature and humidity load factors", () => {
+  // 38°C (+5°) and 80% RH (+20 points) → 1 + 0.02*5 + 0.003*20 = 1.16x
+  const settings = calculateAcSettings(0, "medium", 4.5, 38, 80);
+  assertEquals(Math.round(settings.btu_per_hr * 100) / 100, 2610); // 2250 * 1.16
+});
+
+Deno.test("calculateAcSettings floors the weather multiplier so mild/dry days can't go negative", () => {
+  // 3°C and 0% RH would compute to 0.22x without the floor — clamps to 0.5x
+  const settings = calculateAcSettings(0, "medium", 4.5, 3, 0);
+  assertEquals(settings.btu_per_hr, 1125); // 2250 * 0.5
+  assertEquals(settings.power_kw, 0.25);
+});

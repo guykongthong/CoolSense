@@ -171,6 +171,12 @@
     </select>
   </div>
 
+  <div class="grid3">
+    <div class="field"><label for="outsideTemp">Outside temp (°C)</label><input id="outsideTemp" type="number" step="0.1" value="33" /></div>
+    <div class="field"><label for="outsideHumidity">Outside humidity (%)</label><input id="outsideHumidity" type="number" min="0" max="100" step="1" value="60" /></div>
+  </div>
+  <p style="font-size:0.8rem;color:#666;margin-top:-8px;">Manual entry for the local preview below. The live-database flow fetches real values from weatherapi.com instead.</p>
+
   <button id="calc">Calculate</button>
 
   <div id="dashboard" class="dashboard" style="display:none;">
@@ -193,6 +199,10 @@
         <div class="metric-value" id="btuValue"></div>
       </div>
       <div>
+        <div class="metric-label">Weather</div>
+        <div class="metric-value" id="weatherValue"><img id="weatherIcon" alt="" style="height:1.2em;vertical-align:middle;display:none;" /> <span id="weatherText"></span></div>
+      </div>
+      <div>
         <div class="metric-label">People / Room size</div>
         <div class="metric-value" id="inputSummary"></div>
       </div>
@@ -203,7 +213,9 @@
     <h2>Test against the live database</h2>
     <div class="live-note">
       This calls the real Supabase Edge Functions (<code>room-config</code>, <code>occupancy-readings</code>,
-      <code>calculation</code>) against your local <code>supabase start</code> instance, and writes rows you can
+      <code>weather</code>, <code>calculation</code>) against your local <code>supabase start</code> instance
+      — <code>weather</code> hits the live weatherapi.com API for <code>room-config.location</code>, so
+      <code>supabase/.env</code> needs <code>WEATHERAPI_KEY</code> set — and writes rows you can
       check yourself in <a href="http://127.0.0.1:54323/project/default/editor" target="_blank" rel="noopener">Supabase Studio</a>.
       Requires <code>supabase start</code> and <code>supabase functions serve</code> (or deployed functions) to be running.
     </div>
@@ -265,6 +277,17 @@
     </fieldset>
 
     <fieldset>
+      <legend>Weather load sensitivity (outside temp/humidity → required BTU/hr multiplier)</legend>
+      <div class="grid3">
+        <div class="field"><label for="weatherBaselineTemp">Baseline outside temp (°C)</label><input id="weatherBaselineTemp" type="number" step="0.1" /></div>
+        <div class="field"><label for="weatherBaselineHumidity">Baseline humidity (%)</label><input id="weatherBaselineHumidity" type="number" min="0" max="100" step="1" /></div>
+        <div class="field"><label for="weatherMinMultiplier">Floor multiplier</label><input id="weatherMinMultiplier" type="number" min="0" step="0.05" /></div>
+        <div class="field"><label for="tempLoadFactor">Load % per °C above baseline</label><input id="tempLoadFactor" type="number" step="0.001" /></div>
+        <div class="field"><label for="humidityLoadFactor">Load % per %RH above baseline</label><input id="humidityLoadFactor" type="number" step="0.0001" /></div>
+      </div>
+    </fieldset>
+
+    <fieldset>
       <legend>Room size cooling-capacity multiplier</legend>
       <div class="grid3">
         <div class="field"><label for="multSmall">Small</label><input id="multSmall" type="number" min="0" step="0.05" /></div>
@@ -318,6 +341,11 @@
     btuPerExtraPersonPerHr: 225,
     roomSizeBtuMultiplier: { small: 0.7, medium: 1.0, large: 1.5 },
     standardSeer: 4.5,
+    weatherBaselineTemp: 33,
+    weatherBaselineHumidity: 60,
+    weatherMinMultiplier: 0.5,
+    tempLoadFactor: 0.02,
+    humidityLoadFactor: 0.003,
     modeSettings: {
       eco: { temperature_c: 28, fan_speed: 1, btu_per_hr: 2250 },
       moderate: { temperature_c: 24, fan_speed: 2, btu_per_hr: 11250 },
@@ -354,6 +382,11 @@
     multMedium: ['roomSizeBtuMultiplier', 'medium'],
     multLarge: ['roomSizeBtuMultiplier', 'large'],
     standardSeer: ['standardSeer'],
+    weatherBaselineTemp: ['weatherBaselineTemp'],
+    weatherBaselineHumidity: ['weatherBaselineHumidity'],
+    weatherMinMultiplier: ['weatherMinMultiplier'],
+    tempLoadFactor: ['tempLoadFactor'],
+    humidityLoadFactor: ['humidityLoadFactor'],
     ecoTemp: ['modeSettings', 'eco', 'temperature_c'],
     ecoFan: ['modeSettings', 'eco', 'fan_speed'],
     ecoBtu: ['modeSettings', 'eco', 'btu_per_hr'],
@@ -406,17 +439,27 @@
     return 'eco';
   }
 
-  function calculateAcSettings(peopleCount, roomSize, seer) {
+  function getWeatherMultiplier(outsideTempC, humidityPct) {
+    const raw = 1
+      + criteria.tempLoadFactor * (outsideTempC - criteria.weatherBaselineTemp)
+      + criteria.humidityLoadFactor * (humidityPct - criteria.weatherBaselineHumidity);
+    return Math.max(criteria.weatherMinMultiplier, raw);
+  }
+
+  function calculateAcSettings(peopleCount, roomSize, seer, outsideTempC, humidityPct) {
     const mode = getAcMode(peopleCount, roomSize);
     const base = criteria.modeSettings[mode];
     const baseBtu = base.btu_per_hr * criteria.roomSizeBtuMultiplier[roomSize];
 
-    let btu_per_hr = baseBtu;
+    let requiredBtu = baseBtu;
     if (mode === 'full') {
       const fullThresholdPeople = criteria.densityFull * criteria.roomSizeSqm[roomSize];
       const extraPeople = peopleCount - fullThresholdPeople;
-      btu_per_hr = baseBtu + extraPeople * criteria.btuPerExtraPersonPerHr;
+      requiredBtu = baseBtu + extraPeople * criteria.btuPerExtraPersonPerHr;
     }
+
+    const weatherMultiplier = getWeatherMultiplier(outsideTempC, humidityPct);
+    const btu_per_hr = requiredBtu * weatherMultiplier;
 
     // power (kW) = required BTU/hr ÷ (SEER × 1000)
     const power_kw = btu_per_hr / (seer * 1000);
@@ -444,7 +487,9 @@
     const people = Math.max(0, parseInt(document.getElementById('people').value, 10) || 0);
     const roomSize = document.getElementById('roomSize').value;
     const seer = getSelectedSeer();
-    const settings = calculateAcSettings(people, roomSize, seer);
+    const outsideTempC = parseFloat(document.getElementById('outsideTemp').value) || criteria.weatherBaselineTemp;
+    const humidityPct = parseFloat(document.getElementById('outsideHumidity').value) || criteria.weatherBaselineHumidity;
+    const settings = calculateAcSettings(people, roomSize, seer, outsideTempC, humidityPct);
 
     const dashboard = document.getElementById('dashboard');
     dashboard.style.display = 'block';
@@ -455,6 +500,8 @@
     document.getElementById('fanValue').textContent = 'Fan ' + settings.fan_speed;
     document.getElementById('powerValue').textContent = settings.power_kw.toFixed(2) + ' kW';
     document.getElementById('btuValue').textContent = Math.round(settings.btu_per_hr).toLocaleString() + ' BTU/hr';
+    document.getElementById('weatherIcon').style.display = 'none';
+    document.getElementById('weatherText').textContent = outsideTempC + '°C, ' + humidityPct + '% RH (manual)';
     document.getElementById('inputSummary').textContent = people + ' / ' + roomSize + ' / SEER ' + seer;
   }
 
@@ -462,6 +509,8 @@
   document.getElementById('acEfficiency').addEventListener('change', () => { updateConditionalFields(); runCalculation(); });
   document.getElementById('customSeer').addEventListener('input', runCalculation);
   document.getElementById('location').addEventListener('input', updateConditionalFields);
+  document.getElementById('outsideTemp').addEventListener('input', runCalculation);
+  document.getElementById('outsideHumidity').addEventListener('input', runCalculation);
 
   function logStep(text, ok) {
     const log = document.getElementById('liveLog');
@@ -510,6 +559,9 @@
       const reading = await callFunction('occupancy-readings', { people_count: people, source: 'manual' });
       logStep(`occupancy-readings saved: ${JSON.stringify(reading)}`, true);
 
+      const weather = await callFunction('weather');
+      logStep(`weather fetched from weatherapi.com: ${JSON.stringify(weather)}`, true);
+
       const calc = await callFunction('calculation');
       logStep(`calculation saved: ${JSON.stringify(calc)}`, true);
 
@@ -521,6 +573,15 @@
       document.getElementById('fanValue').textContent = 'Fan ' + calc.fan_speed;
       document.getElementById('powerValue').textContent = Number(calc.power_kw).toFixed(2) + ' kW';
       document.getElementById('btuValue').textContent = Math.round(Number(calc.btu_per_hr)).toLocaleString() + ' BTU/hr';
+      const weatherIcon = document.getElementById('weatherIcon');
+      if (calc.weather_condition_icon_url) {
+        weatherIcon.src = calc.weather_condition_icon_url;
+        weatherIcon.style.display = 'inline';
+      } else {
+        weatherIcon.style.display = 'none';
+      }
+      document.getElementById('weatherText').textContent =
+        calc.outside_temp_c + '°C, ' + calc.humidity_pct + '% RH (' + weather.condition + ')';
       document.getElementById('inputSummary').textContent = people + ' / ' + roomSize;
 
       logStep('Open Supabase Studio to confirm the rows: http://127.0.0.1:54323/project/default/editor', true);
@@ -566,6 +627,12 @@ const MODERATE_DENSITY = ${c.densityModerate};
 const FULL_DENSITY = ${c.densityFull};
 const BTU_PER_EXTRA_PERSON_PER_HR = ${c.btuPerExtraPersonPerHr};
 const STANDARD_SEER = ${c.standardSeer};
+
+const WEATHER_BASELINE_TEMP_C = ${c.weatherBaselineTemp};
+const WEATHER_BASELINE_HUMIDITY_PCT = ${c.weatherBaselineHumidity};
+const TEMP_LOAD_FACTOR_PER_C = ${c.tempLoadFactor};
+const HUMIDITY_LOAD_FACTOR_PER_PCT = ${c.humidityLoadFactor};
+const MIN_WEATHER_MULTIPLIER = ${c.weatherMinMultiplier};
 `;
     const output = document.getElementById('exportOutput');
     output.style.display = 'block';

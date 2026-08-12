@@ -37,7 +37,7 @@
 - Location (manual text input for now — IP geolocation deferred; also feeds the future weather-by-location feature)
 - Room size (small/medium/large — public-space scale, see below)
 - Number of people in the room (currently a manual slider/number input; will be replaced by ML-based people counting from camera input later — see `supabase/functions/occupancy`)
-- Weather (hot/warm/cool)
+- Weather is **not** manually selected — outside temperature and humidity are fetched live from weatherapi.com for `room_config.location` (see `supabase/functions/weather`), not a hot/warm/cool dropdown
 - AC unit efficiency (SEER) — "Auto" (4.5 SEER, the standard reference unit) or a custom SEER value; global per room, always shown
 - Thailand EGAT efficiency label (1-5 stars, or "premium") — **only shown when location is Thailand**; cosmetic/credibility only, does not affect the calculation
 
@@ -51,9 +51,9 @@ Density → Determine AC mode
 ↓
 Mode + Room size → Base temperature, fan speed, required BTU/hr
 ↓
-Required BTU/hr ÷ (selected SEER × 1000) → power_kw
+Outside temp/humidity (weatherapi.com, by location) → weather load multiplier → weather-adjusted BTU/hr
 ↓
-(Weather adjustment not yet implemented — pending science team criteria)
+Weather-adjusted BTU/hr ÷ (selected SEER × 1000) → power_kw
 ↓
 Calculate energy (kWh) & CO₂ emissions
 ```
@@ -74,7 +74,9 @@ Base BTU/hr is also scaled by a room-size multiplier (small ×0.7, medium ×1.0,
 
 **Cooling capacity (BTU/hr) and AC unit efficiency (SEER):** power is derived from physics, not an arbitrary per-mode kW table: `power_kw = required_btu_per_hr ÷ (selected_seer × 1000)`. `required_btu_per_hr` is the mode's base BTU/hr × room-size multiplier (+ extra-person BTU/hr in full mode) — it does **not** depend on SEER, matching how a real AC unit's rated BTU/hr capacity is fixed regardless of its efficiency. The BTU/hr numbers were derived from the original per-mode kW table at the standard reference SEER (4.5), so "Auto" (SEER 4.5) reproduces the original power numbers exactly. A higher SEER (more efficient unit) draws less power for the same BTU/hr; a lower SEER draws more. `calculateAcSettings` returns both `power_kw` and `btu_per_hr` (the latter useful for sizing/selecting a real unit). Stored per room on `room_config.ac_seer` (default 4.5) and returned on `ac_calculations.btu_per_hr`.
 
-**Thailand EGAT label:** stored on `room_config.egat_label` (`'1'`-`'5'` or `'premium'`, nullable). Purely cosmetic — shown in the UI only when `room_config.location` is Thailand, never read by `calculateAcSettings`.
+**Thailand EGAT label:** stored on `room_config.egat_label` (`'1'`-`'5'` or `'premium'`, nullable). Purely cosmetic — shown in the UI only when `room_config.location` is Thailand, never read by `calculateAcSettings`. Enforced server-side too (`supabase/functions/room-config`): rejects setting a label when the resulting location isn't Thailand, and auto-clears a stored label if location changes away from Thailand in a request that doesn't touch the label.
+
+**Weather (outside temperature/humidity):** fetched live from weatherapi.com by `supabase/functions/weather` (needs `WEATHERAPI_KEY` in `supabase/.env` locally, or `supabase secrets set WEATHERAPI_KEY=...` when deployed), using `room_config.location` as the query. Written to a `weather_readings` row (`temp_c`, `humidity_pct`, `condition`, `condition_icon_url`). `calculation` reads the most recent `weather_readings` row and passes `temp_c`/`humidity_pct` into `calculateAcSettings`, which derives a load multiplier: `1 + 0.02 × (outside_temp_c − 33) + 0.003 × (humidity_pct − 60)`, floored at 0.5× — 33°C/60% RH is the baseline the BASE_BTU_PER_HR numbers assume (multiplier 1, unchanged). This multiplier scales `btu_per_hr` (required capacity), not `power_kw` directly, so it composes correctly with the separate SEER-based power derivation. `ac_calculations` stores `outside_temp_c`, `humidity_pct`, `weather_reading_id`, `weather_condition_icon_url`, and a derived `hot`/`warm`/`cool` label (≥33°C hot, 25-33°C warm, <25°C cool) for the legacy `weather` column. If no weather reading exists yet, `calculation` falls back to the 33°C/60% baseline (multiplier 1).
 
 ---
 
@@ -85,7 +87,7 @@ Base BTU/hr is also scaled by a room-size multiplier (small ×0.7, medium ×1.0,
 - Location input (text; drives the conditional EGAT field and later weather-by-location)
 - Room size dropdown
 - People-count input (slider/number, wide enough range e.g. 0-100 to demo all modes — placeholder for future ML camera-based counting)
-- Weather selector
+- No weather selector — outside temperature/humidity are fetched automatically from weatherapi.com by location
 - AC unit efficiency selector (Auto / custom SEER) — always shown, global per room
 - Thailand EGAT efficiency label selector — only shown when location is Thailand
 - Submit button
@@ -94,8 +96,8 @@ Base BTU/hr is also scaled by a room-size multiplier (small ×0.7, medium ×1.0,
 - Convert people count + room size → occupancy density
 - Select AC mode (eco/moderate/full) from density thresholds
 - Apply room size multiplier to the mode's base BTU/hr (required cooling capacity)
-- Derive power consumption: power_kw = required BTU/hr ÷ (selected SEER × 1000)
-- Adjust for weather conditions (not yet implemented)
+- Fetch outside temp/humidity by location (weatherapi.com) and apply the weather load multiplier to required BTU/hr
+- Derive power consumption: power_kw = weather-adjusted BTU/hr ÷ (selected SEER × 1000)
 
 **3. Mock Data Generator** (1-2 hours)
 - Create a 168 hour test dataset
