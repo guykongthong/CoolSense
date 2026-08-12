@@ -6,3 +6,6 @@
 .env.keys
 .env.local
 .env.*.local
+
+# Local function secrets (see .env.example)
+.env
