@@ -83,6 +83,43 @@
     display: none;
     box-sizing: border-box;
   }
+
+  .live-section {
+    margin-top: 32px;
+    border-top: 2px solid #ddd;
+    padding-top: 16px;
+  }
+  .live-note {
+    background: #e3f2fd;
+    border: 1px solid #90caf9;
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-size: 0.85rem;
+    margin-bottom: 16px;
+  }
+  #submitLiveBtn {
+    background: #1565c0;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+  }
+  .live-log {
+    margin-top: 16px;
+    font-family: ui-monospace, monospace;
+    font-size: 0.78rem;
+    white-space: pre-wrap;
+    background: #f5f5f5;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    padding: 12px;
+    display: none;
+  }
+  .live-log .step { margin-bottom: 8px; }
+  .live-log .step.ok { color: #2e7d32; }
+  .live-log .step.err { color: #c62828; }
+  details.live-config { margin-bottom: 12px; }
+  details.live-config summary { cursor: pointer; font-size: 0.85rem; color: #555; }
+  details.live-config .field { margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -125,6 +162,36 @@
         <div class="metric-value" id="inputSummary"></div>
       </div>
     </div>
+  </div>
+
+  <div class="live-section">
+    <h2>Test against the live database</h2>
+    <div class="live-note">
+      This calls the real Supabase Edge Functions (<code>room-config</code>, <code>occupancy-readings</code>,
+      <code>calculation</code>) against your local <code>supabase start</code> instance, and writes rows you can
+      check yourself in <a href="http://127.0.0.1:54323/project/default/editor" target="_blank" rel="noopener">Supabase Studio</a>.
+      Requires <code>supabase start</code> and <code>supabase functions serve</code> (or deployed functions) to be running.
+    </div>
+
+    <details class="live-config">
+      <summary>API connection settings</summary>
+      <div class="field">
+        <label for="apiBase">Functions base URL</label>
+        <input id="apiBase" type="text" value="http://127.0.0.1:54321/functions/v1" />
+      </div>
+      <div class="field">
+        <label for="apiKey">apiKey header (publishable key)</label>
+        <input id="apiKey" type="text" value="sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH" />
+      </div>
+    </details>
+
+    <div class="field">
+      <label for="buildingName">Building name</label>
+      <input id="buildingName" type="text" value="Central Library" />
+    </div>
+
+    <button id="submitLiveBtn">Submit &amp; save to database</button>
+    <div id="liveLog" class="live-log"></div>
   </div>
 
   <div class="criteria">
@@ -326,6 +393,62 @@
   }
 
   document.getElementById('calc').addEventListener('click', runCalculation);
+
+  function logStep(text, ok) {
+    const log = document.getElementById('liveLog');
+    log.style.display = 'block';
+    const line = document.createElement('div');
+    line.className = 'step ' + (ok ? 'ok' : 'err');
+    line.textContent = (ok ? '✓ ' : '✗ ') + text;
+    log.appendChild(line);
+  }
+
+  async function callFunction(name, body) {
+    const base = document.getElementById('apiBase').value.replace(/\/$/, '');
+    const apiKey = document.getElementById('apiKey').value;
+    const res = await fetch(`${base}/${name}`, {
+      method: 'POST',
+      headers: { apiKey, 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(`${name} → HTTP ${res.status}: ${data.message ?? JSON.stringify(data)}`);
+    return data;
+  }
+
+  document.getElementById('submitLiveBtn').addEventListener('click', async () => {
+    const log = document.getElementById('liveLog');
+    log.style.display = 'block';
+    log.innerHTML = '';
+
+    const people = Math.max(0, parseInt(document.getElementById('people').value, 10) || 0);
+    const roomSize = document.getElementById('roomSize').value;
+    const buildingName = document.getElementById('buildingName').value;
+
+    try {
+      const room = await callFunction('room-config', { building_name: buildingName, room_size: roomSize });
+      logStep(`room-config saved: ${JSON.stringify(room)}`, true);
+
+      const reading = await callFunction('occupancy-readings', { people_count: people, source: 'manual' });
+      logStep(`occupancy-readings saved: ${JSON.stringify(reading)}`, true);
+
+      const calc = await callFunction('calculation');
+      logStep(`calculation saved: ${JSON.stringify(calc)}`, true);
+
+      const dashboard = document.getElementById('dashboard');
+      dashboard.style.display = 'block';
+      dashboard.className = 'dashboard ' + calc.ac_mode;
+      document.getElementById('modeLabel').textContent = calc.ac_mode + ' (from database)';
+      document.getElementById('tempValue').textContent = calc.temperature_c + '°C';
+      document.getElementById('fanValue').textContent = 'Fan ' + calc.fan_speed;
+      document.getElementById('powerValue').textContent = Number(calc.power_kw).toFixed(2) + ' kW';
+      document.getElementById('inputSummary').textContent = people + ' / ' + roomSize;
+
+      logStep('Open Supabase Studio to confirm the rows: http://127.0.0.1:54323/project/default/editor', true);
+    } catch (err) {
+      logStep(err.message, false);
+    }
+  });
 
   for (const id of Object.keys(fields)) {
     document.getElementById(id).addEventListener('input', () => {

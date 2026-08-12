@@ -435,6 +435,18 @@ entrypoint = "./functions/calculation/index.ts"
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/calculation/*.html" ]
 
+[functions.room-config]
+enabled = true
+verify_jwt = false
+import_map = "./functions/room-config/deno.json"
+entrypoint = "./functions/room-config/index.ts"
+
+[functions.occupancy-readings]
+enabled = true
+verify_jwt = false
+import_map = "./functions/occupancy-readings/deno.json"
+entrypoint = "./functions/occupancy-readings/index.ts"
+
 [functions.simulation]
 enabled = true
 verify_jwt = false
