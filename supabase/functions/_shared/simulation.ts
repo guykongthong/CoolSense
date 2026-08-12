@@ -1,4 +1,4 @@
-import { calculateAcSettings, type RoomSize } from "./acCalculation.ts";
+import { calculateAcSettings, FULL_DENSITY, MODERATE_DENSITY, ROOM_SIZE_SQM, type RoomSize } from "./acCalculation.ts";
 
 export type WeatherCondition = "hot" | "warm" | "cool";
 
@@ -47,15 +47,19 @@ const WEATHER_CONDITION_PRESETS: Record<WeatherCondition, { tempC: number; humid
   hot: { tempC: 38, humidityPct: 75 },
 };
 
-// Room-size scaling for generated occupancy, mirroring the relative weights
-// acCalculation.ts uses for power (small < medium < large).
-const ROOM_SIZE_OCCUPANCY_MULTIPLIER: Record<RoomSize, number> = { small: 0.7, medium: 1.0, large: 1.5 };
-
-const WEEKDAY_PEAK_MIN = 8;
-const WEEKDAY_PEAK_MAX = 15;
-const WEEKDAY_LOW_MIN = 1;
-const WEEKDAY_LOW_MAX = 3;
-const WEEKEND_OF_WEEKDAY_PEAK_FACTOR = 0.4;
+// Occupancy targets are expressed as density (people ÷ m²) and converted to
+// a people-count via ROOM_SIZE_SQM — the same density the mode thresholds
+// (MODERATE_DENSITY/FULL_DENSITY) are judged against. An earlier version
+// used flat people-count ranges (e.g. "8-15 peak") independent of room
+// size; those numbers were far too low to ever cross the moderate/full
+// thresholds for medium/large rooms (275/450 m², moderate at 14/23 people),
+// so the "smart system" sat in eco the entire simulation — silently, since
+// nothing errored. Deriving targets from the real thresholds keeps this
+// from drifting out of sync again if the thresholds change.
+const PEAK_DENSITY = FULL_DENSITY; // lands right at the full-mode threshold — ±15% noise tips it into full about half the time, moderate the rest
+const LOW_DENSITY = MODERATE_DENSITY * 0.4; // firmly eco
+const WEEKEND_DENSITY = PEAK_DENSITY * 0.4; // "~40% of weekday peak" per spec, on a density basis
+const NIGHT_PEOPLE_COUNT = 0.5; // near-empty regardless of room size — rounds to 0 or 1 with noise
 const NOISE_AMPLITUDE = 0.15;
 
 type HourTier = "night" | "low" | "peak";
@@ -68,14 +72,17 @@ function hourTier(hour: number): HourTier {
   return "low";
 }
 
-// Base occupancy before room-size scaling and noise. Night stays near-empty
-// on weekends too; weekend daytime/peak hours flatten to ~40% of the
-// weekday peak rather than following the weekday peak/low split.
-function baseOccupancy(tier: HourTier, isWeekend: boolean): number {
-  if (tier === "night") return 0.5; // rounds to 0 or 1 depending on noise
-  if (isWeekend) return WEEKDAY_PEAK_MAX * WEEKEND_OF_WEEKDAY_PEAK_FACTOR;
-  if (tier === "peak") return (WEEKDAY_PEAK_MIN + WEEKDAY_PEAK_MAX) / 2;
-  return (WEEKDAY_LOW_MIN + WEEKDAY_LOW_MAX) / 2;
+// Base people count (before noise) for an hour, calibrated against this
+// room size's actual m² so peak hours meaningfully cross the mode
+// thresholds. Night stays near-empty on weekends too; weekend daytime/peak
+// hours flatten to ~40% of the weekday peak density rather than following
+// the weekday peak/low split.
+function baseOccupancy(tier: HourTier, isWeekend: boolean, roomSize: RoomSize): number {
+  if (tier === "night") return NIGHT_PEOPLE_COUNT;
+  const sqm = ROOM_SIZE_SQM[roomSize];
+  if (isWeekend) return WEEKEND_DENSITY * sqm;
+  if (tier === "peak") return PEAK_DENSITY * sqm;
+  return LOW_DENSITY * sqm;
 }
 
 function applyNoise(base: number, random: () => number): number {
@@ -96,7 +103,6 @@ export function generateMockOccupancy(
 ): MockReading[] {
   const now = options.now ?? new Date();
   const random = options.random ?? Math.random;
-  const roomMultiplier = ROOM_SIZE_OCCUPANCY_MULTIPLIER[roomSize];
 
   const readings: MockReading[] = [];
   for (let i = 0; i < durationHours; i++) {
@@ -107,12 +113,11 @@ export function generateMockOccupancy(
     const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
     const hour = timestamp.getHours();
 
-    const base = baseOccupancy(hourTier(hour), isWeekend);
-    const scaledBase = base * roomMultiplier;
+    const base = baseOccupancy(hourTier(hour), isWeekend, roomSize);
 
     readings.push({
       captured_at: timestamp.toISOString(),
-      people_count: applyNoise(scaledBase, random),
+      people_count: applyNoise(base, random),
       source: "mock",
     });
   }

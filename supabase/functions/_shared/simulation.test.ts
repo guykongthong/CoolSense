@@ -1,5 +1,5 @@
 import { assertAlmostEquals, assertEquals } from "jsr:@std/assert@1";
-import { calculateAcSettings } from "./acCalculation.ts";
+import { calculateAcSettings, getAcMode, type RoomSize } from "./acCalculation.ts";
 import { CURRENT_SYSTEM_POWER_KW, generateMockOccupancy, runSimulation } from "./simulation.ts";
 
 const noRandom = () => 0.5; // random()*2-1 = 0 → no noise
@@ -41,10 +41,13 @@ Deno.test("generateMockOccupancy: weekday night hours are near-empty", () => {
   assertEquals(mondayThreeAm!.people_count <= 1, true);
 });
 
-Deno.test("generateMockOccupancy: weekday peak hours (medium room) center around 11-12 people with no noise", () => {
+Deno.test("generateMockOccupancy: weekday peak hours (medium room) land right at the full-mode threshold", () => {
   const readings = generateMockOccupancy(168, "medium", { now: MONDAY_MIDNIGHT, random: noRandom });
   const mondayNoon = readings.find((r) => new Date(r.captured_at).getHours() === 12 && new Date(r.captured_at).getDay() === 1);
-  assertEquals(mondayNoon!.people_count, 12); // (8+15)/2 = 11.5 → rounds to 12
+  // PEAK_DENSITY == FULL_DENSITY (0.15) × 275 m² = 41.25 → 41 people —
+  // just under the 42-person full threshold with zero noise, so ±15% noise
+  // tips it into full or moderate roughly evenly across the week.
+  assertEquals(mondayNoon!.people_count, 41);
 });
 
 Deno.test("generateMockOccupancy: room size scales peak occupancy proportionally", () => {
@@ -62,11 +65,11 @@ Deno.test("generateMockOccupancy: room size scales peak occupancy proportionally
   assertEquals(mediumPeak < largePeak, true);
 });
 
-Deno.test("generateMockOccupancy: weekend daytime occupancy is ~40% of weekday peak", () => {
+Deno.test("generateMockOccupancy: weekend daytime occupancy is ~40% of weekday peak density", () => {
   // Saturday is 5 days after the Monday anchor.
   const saturdayNoon = new Date(2026, 7, 15, 12, 0, 0);
   const readings = generateMockOccupancy(1, "medium", { now: saturdayNoon, random: noRandom });
-  assertEquals(readings[0].people_count, 6); // 15 * 0.4 = 6
+  assertEquals(readings[0].people_count, 17); // WEEKEND_DENSITY (0.06) × 275 m² = 16.5 → 17
 });
 
 Deno.test("generateMockOccupancy: noise stays within ±15% of the base and is never negative", () => {
@@ -74,9 +77,9 @@ Deno.test("generateMockOccupancy: noise stays within ±15% of the base and is ne
   const maxReadings = generateMockOccupancy(24, "medium", { now: MONDAY_23, random: maxRandom });
   const noonIndex = minReadings.findIndex((r) => new Date(r.captured_at).getHours() === 12);
 
-  // Base is 11.5 (rounds to 12 with no noise); -15% → ~9.775 → rounds to 10, +15% → ~13.225 → rounds to 13.
-  assertEquals(minReadings[noonIndex].people_count, 10);
-  assertEquals(maxReadings[noonIndex].people_count, 13);
+  // Base is 41.25 (rounds to 41 with no noise); -15% → ~35.06 → rounds to 35, +15% → ~47.44 → rounds to 47.
+  assertEquals(minReadings[noonIndex].people_count, 35);
+  assertEquals(maxReadings[noonIndex].people_count, 47);
   assertEquals(minReadings.every((r) => r.people_count >= 0), true);
 });
 
@@ -138,6 +141,18 @@ Deno.test("runSimulation: hotter weather_condition raises smart power draw for t
   const hot = runSimulation([20], "medium", 4.5, "hot");
   assertEquals(cool.summary.smart_energy_kwh < warm.summary.smart_energy_kwh, true);
   assertEquals(warm.summary.smart_energy_kwh < hot.summary.smart_energy_kwh, true);
+});
+
+Deno.test("regression: a full week's mock occupancy visits more than one AC mode, for every room size", () => {
+  // Guards against the bug where peak occupancy was calibrated to an
+  // absolute people-count scale instead of density — that left medium/large
+  // rooms stuck in "eco" for the entire 168-hour simulation, with no
+  // fluctuation in smart_power_kw at all.
+  for (const roomSize of ["small", "medium", "large"] as RoomSize[]) {
+    const readings = generateMockOccupancy(168, roomSize, { now: MONDAY_MIDNIGHT, random: noRandom });
+    const modesSeen = new Set(readings.map((r) => getAcMode(r.people_count, roomSize)));
+    assertEquals(modesSeen.size > 1, true, `${roomSize} room only ever reached mode(s): ${[...modesSeen]}`);
+  }
 });
 
 Deno.test("runSimulation: empty input produces a zeroed-out summary, not a crash", () => {
