@@ -3,6 +3,7 @@ import "@supabase/functions-js/edge-runtime.d.ts";
 import { withSupabase } from "@supabase/server";
 import { buildGeminiRequestBody, GeminiParseError, parseGeminiPeopleCount, vertexEndpointUrl } from "../_shared/geminiOccupancy.ts";
 import { getAccessToken, type ServiceAccountCredentials } from "../_shared/googleServiceAuth.ts";
+import { runCalculation } from "../_shared/runCalculation.ts";
 
 interface OccupancyVisionBody {
   image_base64?: string;
@@ -82,6 +83,15 @@ export default {
     if (error) {
       console.error(error.message);
       return Response.json({ message: error.message }, { status: 500 });
+    }
+
+    // Fire a recalculation off this fresh reading so the AC setting actually
+    // reacts to the camera, instead of only updating whenever something
+    // happens to hit GET /calculation. A failure here shouldn't fail the
+    // occupancy write itself — the reading is already saved either way.
+    const { error: calcError } = await runCalculation(db);
+    if (calcError) {
+      console.error(`Recalculation after camera reading failed: ${calcError.message}`);
     }
 
     return Response.json({ people_count: peopleCount, reading: data });
