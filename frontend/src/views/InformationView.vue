@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
+import { getRoomConfig, type RoomSize, updateRoomConfig } from '../lib/api';
 import { t } from '../lib/i18n';
 import { ROOM_IDS, type RoomId } from '../lib/rooms';
 
@@ -7,13 +8,18 @@ import { ROOM_IDS, type RoomId } from '../lib/rooms';
 // page. Several fields here have no backing data/schema yet:
 //   - "Select Room" (multi-room) — room_config is a single-room singleton today
 //   - "Active Device" block — no device table exists
-//   - "Cooling Capacity (BTU/h)" / "Inverter / Fixed Speed" — not modeled in
-//     acCalculation.ts or room_config; BTU/hr today is derived, not entered
-// Fields that DO map to real room_config columns (room_size, egat_label,
-// ac_seer) are left unwired here too, so this page's behavior stays
-// consistent with the People page until we decide how (or whether) to
-// extend the backend for multi-room support.
+//   - "Cooling Capacity (BTU/h)" / "Inverter / Fixed Speed" / Korean-AC grade
+//     — not modeled in acCalculation.ts or room_config, and deliberately not
+//     wired (they'd change the algorithm, not just this form — see the
+//     CoolSense V4 design work if/when that lands). These stay local-only,
+//     never sent to the backend.
+// Only the first device maps to the real room_config singleton — "Add
+// Device" stays decorative until multi-room/multi-device is actually
+// modeled server-side.
 const selectedRoom = ref<RoomId>(ROOM_IDS[0]);
+
+const ROOM_SIZE_TO_LETTER: Record<RoomSize, 's' | 'm' | 'l'> = { small: 's', medium: 'm', large: 'l' };
+const LETTER_TO_ROOM_SIZE: Record<'s' | 'm' | 'l', RoomSize> = { s: 'small', m: 'medium', l: 'large' };
 
 interface DeviceSpec {
   id: number;
@@ -47,6 +53,55 @@ function addDevice() {
 }
 function removeDevice(id: number) {
   devices.value = devices.value.filter((d) => d.id !== id);
+}
+
+// EGAT label is Thailand-only server-side (room-config's isThailand check) —
+// mirrored here so the field only shows when it'd actually be accepted.
+const roomLocation = ref('');
+const isThailand = computed(() => roomLocation.value.trim().toLowerCase().includes('thailand'));
+
+const loading = ref(true);
+const saving = ref(false);
+const loadError = ref(false);
+const saveError = ref(false);
+const saveSuccess = ref(false);
+
+onMounted(async () => {
+  try {
+    const config = await getRoomConfig();
+    roomLocation.value = config.location;
+    const primary = devices.value[0];
+    primary.roomSize = ROOM_SIZE_TO_LETTER[config.room_size];
+    primary.starRating = config.egat_label && config.egat_label !== 'premium' ? config.egat_label : '';
+    primary.seerValue = String(config.ac_seer);
+  } catch {
+    loadError.value = true;
+  } finally {
+    loading.value = false;
+  }
+});
+
+async function saveDevice(idx: number) {
+  // Only the first device is real (see note above) — others are local UI
+  // state only, nothing to save.
+  if (idx !== 0) return;
+
+  const device = devices.value[0];
+  saving.value = true;
+  saveError.value = false;
+  saveSuccess.value = false;
+  try {
+    await updateRoomConfig({
+      room_size: LETTER_TO_ROOM_SIZE[device.roomSize],
+      ac_seer: Number(device.seerValue),
+      egat_label: isThailand.value && device.starRating ? (device.starRating as '3' | '4' | '5') : null,
+    });
+    saveSuccess.value = true;
+  } catch {
+    saveError.value = true;
+  } finally {
+    saving.value = false;
+  }
 }
 
 const selectClass =
@@ -134,9 +189,15 @@ const fieldWrapClass =
 
         <form
           class="flex flex-col flex-1"
-          @submit.prevent
+          @submit.prevent="saveDevice(idx)"
         >
           <div class="p-6 space-y-8 flex-1">
+            <p
+              v-if="idx === 0 && loadError"
+              class="text-label-sm text-error"
+            >
+              {{ t('information.loadError') }}
+            </p>
             <div class="space-y-3">
               <label class="block font-medium text-on-surface">{{ t('information.roomSize') }}</label>
               <div class="flex items-center gap-4">
@@ -167,7 +228,10 @@ const fieldWrapClass =
               </div>
             </div>
 
-            <div class="space-y-2">
+            <div
+              v-if="isThailand"
+              class="space-y-2"
+            >
               <label class="block font-medium text-on-surface">
                 {{ t('information.energyLabel') }} <span class="text-sm font-normal text-on-surface-variant ml-1">{{ t('information.starsHint') }}</span>
               </label>
@@ -290,13 +354,22 @@ const fieldWrapClass =
             </div>
           </div>
 
-          <div class="px-6 py-4 bg-surface-container-low/50 border-t border-outline-variant/30 flex justify-end">
+          <div class="px-6 py-4 bg-surface-container-low/50 border-t border-outline-variant/30 flex items-center justify-end gap-3">
+            <span
+              v-if="idx === 0 && saveError"
+              class="text-label-sm text-error"
+            >{{ t('information.saveError') }}</span>
+            <span
+              v-if="idx === 0 && saveSuccess"
+              class="text-label-sm text-primary"
+            >{{ t('information.saveSuccess') }}</span>
             <button
               type="submit"
-              class="bg-primary text-on-primary text-label-md px-6 py-2.5 rounded-lg hover:bg-primary-container transition-colors shadow-sm flex items-center gap-2"
+              :disabled="idx === 0 && (loading || saving)"
+              class="bg-primary text-on-primary text-label-md px-6 py-2.5 rounded-lg hover:bg-primary-container transition-colors shadow-sm flex items-center gap-2 disabled:opacity-50"
             >
               <span class="material-symbols-outlined text-sm">save</span>
-              {{ t('information.save') }}
+              {{ idx === 0 && saving ? t('information.saving') : t('information.save') }}
             </button>
           </div>
         </form>
