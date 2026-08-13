@@ -99,6 +99,10 @@ export interface SimulationSummary {
   static_v3_cost_baht: number;
   coolsense_v3_cost_baht: number;
   v3_pct_reduction: number;
+  app_energy_kwh: number;
+  net_energy_saved_kwh: number;
+  net_co2_saved_kg: number;
+  net_cost_saved_baht: number;
 }
 
 export interface SimulationRunResult {
