@@ -2,12 +2,17 @@
 import { computed, ref } from 'vue';
 import Card from '../components/ui/Card.vue';
 import StatCard from '../components/ui/StatCard.vue';
+import { useAcCalculation } from '../composables/useAcCalculation';
 import { useCameraOccupancy } from '../composables/useCameraOccupancy';
 import { useOccupancy } from '../composables/useOccupancy';
 import { t } from '../lib/i18n';
 
 const { videoRef, isMonitoring, isAnalyzing, latestCount, error, start, stop } = useCameraOccupancy();
 const { latestReading } = useOccupancy();
+const { latestCalculation } = useAcCalculation();
+
+const acTempDisplay = computed(() => (latestCalculation.value ? `${latestCalculation.value.temperature_c}°C` : '—'));
+const acModeDisplay = computed(() => (latestCalculation.value ? t(`people.acMode.${latestCalculation.value.ac_mode}`) : ''));
 
 const currentOccupancyDisplay = computed(() => {
   // While the camera is monitoring, prefer its direct Gemini response over the
@@ -95,7 +100,7 @@ const activityRange = ref<'12h' | '24h'>('24h');
       icon="group"
     />
 
-    <div class="bg-white rounded-xl border border-slate-200 shadow-[0_4px_20px_rgba(6,78,59,0.05)] p-6 flex flex-col justify-between h-48 lg:col-span-2">
+    <div class="bg-white rounded-xl border border-slate-200 shadow-[0_4px_20px_rgba(6,78,59,0.05)] p-6 flex flex-col justify-between h-48">
       <div class="flex justify-between items-start mb-4">
         <h3 class="text-label-md text-on-surface-variant">
           {{ t('people.peakOccupancyToday') }}
@@ -117,6 +122,14 @@ const activityRange = ref<'12h' | '24h'>('24h');
         />
       </div>
     </div>
+
+    <StatCard
+      :label="t('people.acSetting')"
+      :value="acTempDisplay"
+      icon="thermostat"
+    >
+      <span class="text-label-sm text-outline">{{ acModeDisplay }}</span>
+    </StatCard>
   </div>
 
   <Card :title="t('people.camera.title')">
