@@ -183,9 +183,9 @@
   <div class="field">
     <label for="roomSize">Room size</label>
     <select id="roomSize">
-      <option value="small">Small (50-150 m²)</option>
-      <option value="medium" selected>Medium (150-400 m²)</option>
-      <option value="large">Large (400+ m²)</option>
+      <option value="small">Small (20-40 m²)</option>
+      <option value="medium" selected>Medium (40-80 m²)</option>
+      <option value="large">Large (80+ m²)</option>
     </select>
   </div>
 
@@ -475,7 +475,7 @@
   // Defaults mirror supabase/functions/_shared/acCalculation.ts as of the last sync.
   // These are the fallback/reset values, NOT necessarily the science team's final criteria.
   const DEFAULT_CRITERIA = {
-    roomSizeSqm: { small: 100, medium: 275, large: 450 },
+    roomSizeSqm: { small: 30, medium: 60, large: 120 },
     densityModerate: 0.05,
     densityFull: 0.15,
     btuPerExtraPersonPerHr: 225,

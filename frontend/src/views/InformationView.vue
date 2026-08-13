@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { getRoomConfig, type RoomSize, updateRoomConfig } from '../lib/api';
+import { getRoomConfig, ROOM_SIZE_SQM_RANGES, type RoomSize, updateRoomConfig } from '../lib/api';
 import { t } from '../lib/i18n';
 import { ROOM_IDS, type RoomId } from '../lib/rooms';
 
@@ -78,7 +78,12 @@ const MAX_AC_SEER = 25;
 
 const ROOM_SIZE_LABEL_KEY: Record<'s' | 'm' | 'l', string> = { s: 'common.small', m: 'common.medium', l: 'common.large' };
 const primaryDevice = computed(() => devices.value[0]);
-const savedRoomSizeLabel = computed(() => t(ROOM_SIZE_LABEL_KEY[primaryDevice.value.roomSize]));
+const savedRoomSizeLabel = computed(
+  () =>
+    `${t(ROOM_SIZE_LABEL_KEY[primaryDevice.value.roomSize])} (${
+      ROOM_SIZE_SQM_RANGES[LETTER_TO_ROOM_SIZE[primaryDevice.value.roomSize]]
+    })`,
+);
 const savedSeerLabel = computed(() => primaryDevice.value.seerValue || '—');
 const savedCapacityLabel = computed(() =>
   primaryDevice.value.coolingCapacity ? `${primaryDevice.value.coolingCapacity} BTU/h` : '—',
@@ -286,7 +291,7 @@ const fieldWrapClass =
                     type="radio"
                     value="s"
                     class="accent-[#003527] w-4 h-4"
-                  > S
+                  > S <span class="text-on-surface-variant text-label-sm">({{ ROOM_SIZE_SQM_RANGES.small }})</span>
                 </label>
                 <label class="flex items-center gap-2">
                   <input
@@ -294,7 +299,7 @@ const fieldWrapClass =
                     type="radio"
                     value="m"
                     class="accent-[#003527] w-4 h-4"
-                  > M
+                  > M <span class="text-on-surface-variant text-label-sm">({{ ROOM_SIZE_SQM_RANGES.medium }})</span>
                 </label>
                 <label class="flex items-center gap-2">
                   <input
@@ -302,7 +307,7 @@ const fieldWrapClass =
                     type="radio"
                     value="l"
                     class="accent-[#003527] w-4 h-4"
-                  > L
+                  > L <span class="text-on-surface-variant text-label-sm">({{ ROOM_SIZE_SQM_RANGES.large }})</span>
                 </label>
               </div>
             </div>

@@ -52,10 +52,10 @@ Deno.test("generateMockOccupancy: weekday night hours are near-empty", () => {
 Deno.test("generateMockOccupancy: weekday peak hours (medium room) land right at the full-mode threshold", () => {
   const readings = generateMockOccupancy(168, "medium", { now: MONDAY_MIDNIGHT, random: noRandom });
   const mondayNoon = readings.find((r) => new Date(r.captured_at).getHours() === 12 && new Date(r.captured_at).getDay() === 1);
-  // PEAK_DENSITY == FULL_DENSITY (0.15) × 275 m² = 41.25 → 41 people —
-  // just under the 42-person full threshold with zero noise, so ±15% noise
-  // tips it into full or moderate roughly evenly across the week.
-  assertEquals(mondayNoon!.people_count, 41);
+  // PEAK_DENSITY == FULL_DENSITY (0.15) × 60 m² = 9 people exactly — lands
+  // right on the full-mode threshold with zero noise, so ±15% noise tips it
+  // into full or moderate roughly evenly across the week.
+  assertEquals(mondayNoon!.people_count, 9);
 });
 
 Deno.test("generateMockOccupancy: room size scales peak occupancy proportionally", () => {
@@ -77,7 +77,7 @@ Deno.test("generateMockOccupancy: weekend daytime occupancy is ~40% of weekday p
   // Saturday is 5 days after the Monday anchor.
   const saturdayNoon = new Date(2026, 7, 15, 12, 0, 0);
   const readings = generateMockOccupancy(1, "medium", { now: saturdayNoon, random: noRandom });
-  assertEquals(readings[0].people_count, 17); // WEEKEND_DENSITY (0.06) × 275 m² = 16.5 → 17
+  assertEquals(readings[0].people_count, 4); // WEEKEND_DENSITY (0.06) × 60 m² = 3.6 → 4
 });
 
 Deno.test("generateMockOccupancy: noise stays within ±15% of the base and is never negative", () => {
@@ -85,9 +85,9 @@ Deno.test("generateMockOccupancy: noise stays within ±15% of the base and is ne
   const maxReadings = generateMockOccupancy(24, "medium", { now: MONDAY_23, random: maxRandom });
   const noonIndex = minReadings.findIndex((r) => new Date(r.captured_at).getHours() === 12);
 
-  // Base is 41.25 (rounds to 41 with no noise); -15% → ~35.06 → rounds to 35, +15% → ~47.44 → rounds to 47.
-  assertEquals(minReadings[noonIndex].people_count, 35);
-  assertEquals(maxReadings[noonIndex].people_count, 47);
+  // Base is 9 (0.15 × 60, exact, no noise); -15% → 7.65 → rounds to 8, +15% → 10.35 → rounds to 10.
+  assertEquals(minReadings[noonIndex].people_count, 8);
+  assertEquals(maxReadings[noonIndex].people_count, 10);
   assertEquals(minReadings.every((r) => r.people_count >= 0), true);
 });
 
@@ -276,11 +276,11 @@ Deno.test("runSimulation: static_v3 baseline scales with room size (small < medi
 });
 
 Deno.test("runSimulation: static_v3 baseline at default static_temp_c (25°C, clamped to full mode's 21°C) equals the full-occupancy V3 power exactly", () => {
-  // medium room: full-mode implied occupancy = ceil(0.15 * 275) = 42 people.
+  // medium room: full-mode implied occupancy = ceil(0.15 * 60) = 9 people.
   // 25°C is warmer than full mode's 21°C base, so it clamps to 21°C — no
   // multiplier adjustment (degreesColderThanFullModeBase = 0).
   const { hourly } = runSimulation([0], "medium", 15, "warm", undefined, DEFAULT_STATIC_TEMP_C);
-  const worstCase = calculateCoolSenseV3Settings(42, "medium", 15, 33, 60, "neutral");
+  const worstCase = calculateCoolSenseV3Settings(9, "medium", 15, 33, 60, "neutral");
   assertAlmostEquals(hourly[0].static_v3_power_kw, worstCase.power_kw, 1e-9);
 });
 
@@ -300,22 +300,22 @@ Deno.test("runSimulation: CoolSense V3 hourly power matches calculateCoolSenseV3
 });
 
 Deno.test("runSimulation: CoolSense V3 (neutral comfort) never exceeds the static-v3 baseline, even at full occupancy", () => {
-  // large room, full-mode implied occupancy = ceil(0.15*450) = 68 people, baseline weather.
-  const { hourly } = runSimulation([68], "large", 15, "warm", undefined, DEFAULT_STATIC_TEMP_C, "neutral");
+  // large room, full-mode implied occupancy = ceil(0.15*120) = 18 people, baseline weather.
+  const { hourly } = runSimulation([18], "large", 15, "warm", undefined, DEFAULT_STATIC_TEMP_C, "neutral");
   assertEquals(hourly[0].coolsense_v3_power_kw <= hourly[0].static_v3_power_kw, true);
 });
 
 Deno.test("runSimulation: CoolSense V3 never exceeds the static-v3 baseline at full occupancy under hot weather", () => {
-  // small room, full-mode implied occupancy = ceil(0.15*100) = 15 people.
+  // small room, full-mode implied occupancy = ceil(0.15*30) = 5 people.
   // "hot" (38C/75%) sits well above the 33C/60% baseline the static
   // sizing must also account for, not just baseline-weather worst-case.
-  const { hourly } = runSimulation([15], "small", 15, "hot", undefined, DEFAULT_STATIC_TEMP_C, "neutral");
+  const { hourly } = runSimulation([5], "small", 15, "hot", undefined, DEFAULT_STATIC_TEMP_C, "neutral");
   assertEquals(hourly[0].coolsense_v3_power_kw <= hourly[0].static_v3_power_kw, true);
 });
 
 Deno.test("runSimulation: CoolSense V3 never exceeds the static-v3 baseline at full occupancy under diurnal peak weather", () => {
   const peakHour = new Date(2026, 7, 10, 15, 0, 0); // 3pm, diurnal peak (36C/80%)
-  const { hourly } = runSimulation([15], "small", 15, "diurnal", [peakHour], DEFAULT_STATIC_TEMP_C, "neutral");
+  const { hourly } = runSimulation([5], "small", 15, "diurnal", [peakHour], DEFAULT_STATIC_TEMP_C, "neutral");
   assertEquals(hourly[0].coolsense_v3_power_kw <= hourly[0].static_v3_power_kw, true);
 });
 

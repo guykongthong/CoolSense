@@ -1,29 +1,29 @@
 import { assertEquals } from "jsr:@std/assert@1";
 import { calculateAcSettings, getAcMode } from "./acCalculation.ts";
 
-// Room m² midpoints used for density: small=100, medium=275, large=450.
+// Room m² midpoints used for density: small=30, medium=60, large=120.
 // Density thresholds: moderate >= 0.05 people/m², full >= 0.15 people/m².
 // power_kw = btu_per_hr / (seer * 1000); default seer is the standard 4.5.
 
-Deno.test("small room thresholds (100 m²)", () => {
-  assertEquals(getAcMode(4, "small"), "eco"); // 0.04
-  assertEquals(getAcMode(5, "small"), "moderate"); // 0.05
-  assertEquals(getAcMode(14, "small"), "moderate"); // 0.14
-  assertEquals(getAcMode(15, "small"), "full"); // 0.15
+Deno.test("small room thresholds (30 m²)", () => {
+  assertEquals(getAcMode(1, "small"), "eco"); // 0.0333
+  assertEquals(getAcMode(2, "small"), "moderate"); // 0.0667
+  assertEquals(getAcMode(4, "small"), "moderate"); // 0.1333
+  assertEquals(getAcMode(5, "small"), "full"); // 0.1667
 });
 
-Deno.test("medium room thresholds (275 m²)", () => {
-  assertEquals(getAcMode(13, "medium"), "eco"); // 0.0473
-  assertEquals(getAcMode(14, "medium"), "moderate"); // 0.0509
-  assertEquals(getAcMode(41, "medium"), "moderate"); // 0.1491
-  assertEquals(getAcMode(42, "medium"), "full"); // 0.1527
+Deno.test("medium room thresholds (60 m²)", () => {
+  assertEquals(getAcMode(2, "medium"), "eco"); // 0.0333
+  assertEquals(getAcMode(3, "medium"), "moderate"); // 0.05
+  assertEquals(getAcMode(8, "medium"), "moderate"); // 0.1333
+  assertEquals(getAcMode(9, "medium"), "full"); // 0.15
 });
 
-Deno.test("large room thresholds (450 m²)", () => {
-  assertEquals(getAcMode(22, "large"), "eco"); // 0.0489
-  assertEquals(getAcMode(23, "large"), "moderate"); // 0.0511
-  assertEquals(getAcMode(67, "large"), "moderate"); // 0.1489
-  assertEquals(getAcMode(68, "large"), "full"); // 0.1511
+Deno.test("large room thresholds (120 m²)", () => {
+  assertEquals(getAcMode(5, "large"), "eco"); // 0.0417
+  assertEquals(getAcMode(6, "large"), "moderate"); // 0.05
+  assertEquals(getAcMode(17, "large"), "moderate"); // 0.1417
+  assertEquals(getAcMode(18, "large"), "full"); // 0.15
 });
 
 Deno.test("calculateAcSettings returns base settings for eco/moderate", () => {
@@ -34,7 +34,7 @@ Deno.test("calculateAcSettings returns base settings for eco/moderate", () => {
     power_kw: 0.5,
     btu_per_hr: 2250,
   });
-  assertEquals(calculateAcSettings(14, "medium"), {
+  assertEquals(calculateAcSettings(3, "medium"), {
     mode: "moderate",
     temperature_c: 24,
     fan_speed: 2,
@@ -53,31 +53,31 @@ Deno.test("calculateAcSettings applies the room-size multiplier to BTU and power
 });
 
 Deno.test("calculateAcSettings holds temp/fan but scales power+BTU in full mode", () => {
-  // small room: full density threshold is 15 people (0.15 * 100), base BTU = 20250 * 0.7 = 14175
-  assertEquals(calculateAcSettings(15, "small"), {
+  // small room: full density threshold is 4.5 people (0.15 * 30), base BTU = 20250 * 0.7 = 14175
+  assertEquals(calculateAcSettings(5, "small"), {
     mode: "full",
     temperature_c: 21,
     fan_speed: 3,
-    power_kw: 3.15,
-    btu_per_hr: 14175,
+    power_kw: 3.175, // (14175 + (5 - 4.5) * 225) / 4500
+    btu_per_hr: 14287.5,
   });
-  assertEquals(calculateAcSettings(20, "small"), {
+  assertEquals(calculateAcSettings(10, "small"), {
     mode: "full",
     temperature_c: 21,
     fan_speed: 3,
-    power_kw: 3.4, // (14175 + (20 - 15) * 225) / 4500
-    btu_per_hr: 15300,
+    power_kw: 3.425, // (14175 + (10 - 4.5) * 225) / 4500
+    btu_per_hr: 15412.5,
   });
 });
 
 Deno.test("calculateAcSettings scales power+BTU for library-sized crowds", () => {
-  // large room: full density threshold is 67.5 people (0.15 * 450), base BTU = 20250 * 1.5 = 30375
-  assertEquals(calculateAcSettings(100, "large"), {
+  // large room: full density threshold is 18 people (0.15 * 120), base BTU = 20250 * 1.5 = 30375
+  assertEquals(calculateAcSettings(40, "large"), {
     mode: "full",
     temperature_c: 21,
     fan_speed: 3,
-    power_kw: 8.375, // (30375 + (100 - 67.5) * 225) / 4500
-    btu_per_hr: 37687.5,
+    power_kw: 7.85, // (30375 + (40 - 18) * 225) / 4500
+    btu_per_hr: 35325,
   });
 });
 
@@ -98,17 +98,17 @@ Deno.test("calculateAcSettings scales power up for a less efficient unit", () =>
 });
 
 Deno.test("calculateAcSettings keeps required BTU/hr constant across SEER — only power_kw changes", () => {
-  const lowEfficiency = calculateAcSettings(20, "small", 2.25);
-  const standard = calculateAcSettings(20, "small", 4.5);
-  const highEfficiency = calculateAcSettings(20, "small", 9);
+  const lowEfficiency = calculateAcSettings(10, "small", 2.25);
+  const standard = calculateAcSettings(10, "small", 4.5);
+  const highEfficiency = calculateAcSettings(10, "small", 9);
 
-  assertEquals(lowEfficiency.btu_per_hr, 15300);
-  assertEquals(standard.btu_per_hr, 15300);
-  assertEquals(highEfficiency.btu_per_hr, 15300);
+  assertEquals(lowEfficiency.btu_per_hr, 15412.5);
+  assertEquals(standard.btu_per_hr, 15412.5);
+  assertEquals(highEfficiency.btu_per_hr, 15412.5);
 
-  assertEquals(lowEfficiency.power_kw, 6.8); // 15300 / 2250
-  assertEquals(standard.power_kw, 3.4); // 15300 / 4500
-  assertEquals(highEfficiency.power_kw, 1.7); // 15300 / 9000
+  assertEquals(lowEfficiency.power_kw, 6.85); // 15412.5 / 2250
+  assertEquals(standard.power_kw, 3.425); // 15412.5 / 4500
+  assertEquals(highEfficiency.power_kw, 1.7125); // 15412.5 / 9000
 });
 
 Deno.test("calculateAcSettings defaults to baseline weather (33°C, 60% RH) when omitted — unchanged", () => {

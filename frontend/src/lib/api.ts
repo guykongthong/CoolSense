@@ -6,10 +6,12 @@ export type ComfortPreference = 'cold' | 'neutral' | 'warm';
 export type EgatLabel = '1' | '2' | '3' | '4' | '5' | 'premium';
 export type WeatherCondition = 'hot' | 'warm' | 'cool' | 'diurnal';
 
+// Mirrors supabase/functions/_shared/acCalculation.ts's ROOM_SIZE_SQM_RANGES
+// — keep in sync if that changes (no shared build between frontend/functions).
 export const ROOM_SIZE_SQM_RANGES: Record<RoomSize, string> = {
-  small: '50-150 m²',
-  medium: '150-400 m²',
-  large: '400+ m²',
+  small: '20-40 m²',
+  medium: '40-80 m²',
+  large: '80+ m²',
 };
 
 export interface RoomConfig {
@@ -230,11 +232,12 @@ export interface HistoryPoint {
   value: number;
 }
 
-// "Today" buckets by 15-minute slice instead of by hour — camera readings
-// arrive every ~5s, so hourly buckets flattened out almost all of that
-// detail into a near-static line. 96 buckets/day is still smooth to read
-// but shows real movement within an hour.
-export const TODAY_BUCKET_MINUTES = 15;
+// "Today" buckets by 1-minute slice instead of by hour — camera readings
+// arrive every ~5s, so hourly (or even 15-minute) buckets flattened out
+// most of that detail into a near-static line. 1440 buckets/day still
+// renders fine (LineAreaChart is a handful of SVG polylines) and matches
+// the 30s poll interval closely enough that new readings show up promptly.
+export const TODAY_BUCKET_MINUTES = 1;
 
 export function rangeStart(range: DateRange): Date {
   const now = new Date();

@@ -38,7 +38,7 @@ Deno.test("eco mode never eases from weather alone — its base temp already sit
 });
 
 Deno.test("moderate/full ease is clamped to the mode's range ceiling under extreme mild conditions", () => {
-  // 50 people/medium room: density 50/275 = 0.182 → full mode. Extremely
+  // 50 people/medium room: density 50/60 = 0.833 → full mode. Extremely
   // cold/dry outside should still clamp adjusted_temp_c at the range max (23).
   const v2 = calculateCoolSenseV2Settings(50, "medium", 4.5, -20, 0);
   assertEquals(v2.mode, "full");
@@ -106,14 +106,15 @@ Deno.test("humidity easing alone (temp at baseline) still reduces power", () => 
 });
 
 Deno.test("exact ease-degree math for a moderate-mode mild-condition case", () => {
-  // moderate mode, 10°C below baseline temp, 20%RH below baseline humidity.
-  // tempEase = 0.3*10 = 3, humidityEase = 0.02*20 = 0.4 → raw ease 3.4,
-  // clamped to moderate's ceiling (26), base 24 → applied change = 2.
-  const v2 = calculateCoolSenseV2Settings(15, "medium", 4.5, 23, 40);
+  // moderate mode (5 people/medium room, density 5/60 = 0.083), 10°C below
+  // baseline temp, 20%RH below baseline humidity. tempEase = 0.3*10 = 3,
+  // humidityEase = 0.02*20 = 0.4 → raw ease 3.4, clamped to moderate's
+  // ceiling (26), base 24 → applied change = 2.
+  const v2 = calculateCoolSenseV2Settings(5, "medium", 4.5, 23, 40);
   assertEquals(v2.mode, "moderate");
   assertEquals(v2.base_temp_c, 24);
   assertEquals(v2.adjusted_temp_c, 26);
-  const base = calculateAcSettings(15, "medium", 4.5, 23, 40);
+  const base = calculateAcSettings(5, "medium", 4.5, 23, 40);
   assertAlmostEquals(v2.btu_per_hr, base.btu_per_hr * 0.9, 1e-9); // 1 - 0.05*2
 
 });
@@ -127,17 +128,17 @@ Deno.test("comfort_preference defaults to neutral (no offset) when omitted", () 
 });
 
 Deno.test("comfort_preference 'warm' at baseline weather: +2°C, clamped to moderate's ceiling (matches the peer spec example)", () => {
-  // 20 people/medium room at baseline (33/60) → moderate mode, base 24°C.
+  // 5 people/medium room at baseline (33/60) → moderate mode, base 24°C.
   // warm: 24 + 2 = 26, within moderate's 22-26 range.
-  const v2 = calculateCoolSenseV2Settings(20, "medium", 4.5, 33, 60, "warm");
+  const v2 = calculateCoolSenseV2Settings(5, "medium", 4.5, 33, 60, "warm");
   assertEquals(v2.mode, "moderate");
   assertEquals(v2.base_temp_c, 24);
   assertEquals(v2.adjusted_temp_c, 26);
 });
 
 Deno.test("comfort_preference 'cold' at baseline weather: -2°C, and power_kw rises above the base model", () => {
-  const base = calculateAcSettings(20, "medium", 4.5, 33, 60);
-  const v2 = calculateCoolSenseV2Settings(20, "medium", 4.5, 33, 60, "cold");
+  const base = calculateAcSettings(5, "medium", 4.5, 33, 60);
+  const v2 = calculateCoolSenseV2Settings(5, "medium", 4.5, 33, 60, "cold");
   assertEquals(v2.mode, "moderate");
   assertEquals(v2.adjusted_temp_c, 22); // 24 - 2, within 22-26 range
   assertEquals(v2.power_kw > base.power_kw, true);
@@ -155,7 +156,7 @@ Deno.test("comfort_preference 'cold' is clamped to the mode's range floor, never
 Deno.test("comfort_preference 'warm' composes with weather easing, still clamped to the ceiling", () => {
   // Mild weather already eases moderate mode to 26 (the ceiling); warm
   // preference can't push it any further past the ceiling.
-  const v2 = calculateCoolSenseV2Settings(15, "medium", 4.5, 23, 40, "warm");
+  const v2 = calculateCoolSenseV2Settings(5, "medium", 4.5, 23, 40, "warm");
   assertEquals(v2.mode, "moderate");
   assertEquals(v2.adjusted_temp_c, 26);
 });

@@ -79,15 +79,15 @@ Deno.test("comfort_preference defaults to neutral (no offset) when omitted", () 
 });
 
 Deno.test("comfort_preference 'warm': +2°C, clamped to moderate's ceiling", () => {
-  const v3 = calculateCoolSenseV3Settings(20, "medium", 15, 33, 60, "warm");
+  const v3 = calculateCoolSenseV3Settings(5, "medium", 15, 33, 60, "warm");
   assertEquals(v3.mode, "moderate");
   assertEquals(v3.base_temp_c, 24);
   assertEquals(v3.adjusted_temp_c, 26);
 });
 
 Deno.test("comfort_preference 'cold': -2°C, and power_kw rises above the base V3 model", () => {
-  const base = calculateAcSettingsV3(20, "medium", 15, 33, 60);
-  const v3 = calculateCoolSenseV3Settings(20, "medium", 15, 33, 60, "cold");
+  const base = calculateAcSettingsV3(5, "medium", 15, 33, 60);
+  const v3 = calculateCoolSenseV3Settings(5, "medium", 15, 33, 60, "cold");
   assertEquals(v3.adjusted_temp_c, 22);
   assertEquals(v3.power_kw > base.power_kw, true);
 });
@@ -101,13 +101,14 @@ Deno.test("comfort_preference ordering: cold power >= neutral power >= warm powe
 });
 
 Deno.test("exact ease-degree math for a moderate-mode mild-condition case", () => {
-  // moderate mode, 10°C below baseline temp, 20%RH below baseline humidity.
-  // tempEase = 0.3*10 = 3, humidityEase = 0.02*20 = 0.4 → raw ease 3.4,
-  // clamped to moderate's ceiling (26), base 24 → applied change = 2.
-  const v3 = calculateCoolSenseV3Settings(15, "medium", 15, 23, 40);
+  // moderate mode (5 people/medium room, density 5/60 = 0.083), 10°C below
+  // baseline temp, 20%RH below baseline humidity. tempEase = 0.3*10 = 3,
+  // humidityEase = 0.02*20 = 0.4 → raw ease 3.4, clamped to moderate's
+  // ceiling (26), base 24 → applied change = 2.
+  const v3 = calculateCoolSenseV3Settings(5, "medium", 15, 23, 40);
   assertEquals(v3.mode, "moderate");
   assertEquals(v3.base_temp_c, 24);
   assertEquals(v3.adjusted_temp_c, 26);
-  const base = calculateAcSettingsV3(15, "medium", 15, 23, 40);
+  const base = calculateAcSettingsV3(5, "medium", 15, 23, 40);
   assertAlmostEquals(v3.btu_per_hr, base.btu_per_hr * 0.9, 1e-9); // 1 - 0.05*2
 });

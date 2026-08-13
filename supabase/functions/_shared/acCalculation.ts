@@ -9,19 +9,30 @@ export interface AcSettings {
   btu_per_hr: number;
 }
 
-// Reference m² boundaries for public spaces (libraries, cafes, restaurants) —
-// used to help an admin pick a room_size, not stored/enforced in the schema.
+// Reference m² boundaries for public spaces (small meeting rooms, classrooms,
+// small halls) — used to help an admin pick a room_size, not stored/enforced
+// in the schema. Lowered 2026-08-13 from the original 50-150/150-400/400+
+// scale: at that scale, CoolSense V3's realistic BTU/hr sizing (see
+// acCalculationV3.ts) required 50,000-100,000+ BTU/hr of capacity at
+// moderate/full occupancy — far beyond what a single real AC unit (a
+// residential/light-commercial split typically tops out around 24,000-60,000
+// BTU/hr) can deliver, which read as unrealistic in a pitch ("a 12,000 BTU
+// unit can't handle 40 people"). The smaller scale below keeps each room
+// size servable by one plausible real unit at full occupancy. Multi-AC-unit
+// support (room_config becoming a real multi-row table) would be the other
+// way to fix this, but is a much bigger rework than rescaling these
+// constants — deferred, see project memory.
 export const ROOM_SIZE_SQM_RANGES: Record<RoomSize, string> = {
-  small: "50-150 m²",
-  medium: "150-400 m²",
-  large: "400+ m²",
+  small: "20-40 m²",
+  medium: "40-80 m²",
+  large: "80+ m²",
 };
 
 // Representative m² per room size — the midpoint of each range above (large
-// has no upper bound, so it uses a representative value past 400). Occupancy
+// has no upper bound, so it uses a representative value past 80). Occupancy
 // density (people ÷ m²) is computed against this, not a stored room area,
 // since MVP doesn't collect an exact square footage per room.
-export const ROOM_SIZE_SQM: Record<RoomSize, number> = { small: 100, medium: 275, large: 450 };
+export const ROOM_SIZE_SQM: Record<RoomSize, number> = { small: 30, medium: 60, large: 120 };
 
 // Base temp/fan per mode. Weather adjustments will be layered in once the
 // science team defines the criteria for that.
