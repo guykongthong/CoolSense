@@ -209,6 +209,13 @@ async function handleRun(req: Request, ctx: SupabaseContext): Promise<Response> 
       pct_reduction: summary.pct_reduction,
       static_temp_c: staticTempC,
       comfort_preference: comfortPreference,
+      static_v3_energy_kwh: summary.static_v3_energy_kwh,
+      coolsense_v3_energy_kwh: summary.coolsense_v3_energy_kwh,
+      static_v3_co2_kg: summary.static_v3_co2_kg,
+      coolsense_v3_co2_kg: summary.coolsense_v3_co2_kg,
+      static_v3_cost_baht: summary.static_v3_cost_baht,
+      coolsense_v3_cost_baht: summary.coolsense_v3_cost_baht,
+      v3_pct_reduction: summary.v3_pct_reduction,
     })
     .select()
     .maybeSingle();
@@ -277,7 +284,7 @@ async function handleListSimulations(ctx: SupabaseContext): Promise<Response> {
   const db = ctx.supabaseAdmin as any;
   const { data, error } = await db
     .from("simulation_runs")
-    .select("id, duration_hours, pct_reduction, current_energy_kwh, smart_energy_kwh, created_at")
+    .select("id, duration_hours, pct_reduction, current_energy_kwh, smart_energy_kwh, v3_pct_reduction, coolsense_v3_energy_kwh, created_at")
     .order("created_at", { ascending: false })
     .limit(RECENT_SIMULATIONS_LIMIT);
 
