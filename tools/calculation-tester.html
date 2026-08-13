@@ -126,7 +126,6 @@
     border-top: 2px solid #ddd;
     padding-top: 16px;
     --series-current: #2a78d6;
-    --series-smart: #eb6834;
     --series-v2: #1baf7a;
   }
   .sim-section h3 { font-size: 0.9rem; margin: 20px 0 8px; }
@@ -300,19 +299,21 @@
   </div>
 
   <div class="sim-section">
-    <h2>168-Hour Simulation: Static vs Current Model vs CoolSense V2</h2>
+    <h2>168-Hour Simulation: Static vs CoolSense V2</h2>
     <div class="live-note">
-      Generates mock occupancy for the given duration, runs the static-vs-current-model comparison
-      (<code>/simulation/generate-mock-data</code> → <code>/simulation/run</code>) on the backend, reads
-      <code>simulation_hourly_data</code> via REST, then computes CoolSense V2's numbers client-side
-      (mirroring <code>coolSenseV2Calculation.ts</code>) over that same occupancy data — so all three scenarios
-      run against identical input. Uses the same connection settings as the live-database section above.
+      Generates mock occupancy for the given duration, then runs the static-vs-CoolSense-V2 comparison
+      (<code>/simulation/generate-mock-data</code> → <code>/simulation/run</code>) entirely on the backend
+      (<code>coolSenseV2Calculation.ts</code>), reading the results back via <code>simulation_hourly_data</code>.
+      Uses the same connection settings as the live-database section above.
       <br><br>
-      <strong>CoolSense V2:</strong> same mode/BTU/SEER logic as the current model, plus — when outside
-      conditions are <em>milder</em> than the 33°C/60%RH baseline — the setpoint relaxes (warmer, less
-      aggressive) within its mode's range, which legitimately draws less power. It never tightens further
-      when hot/humid; that heat load is already priced into the current model's weather multiplier, so
-      adjusting the setpoint too would double-count it.
+      <strong>Static:</strong> always-on, fan 3, constant draw at a configurable setpoint (default 25°C) —
+      the naive baseline every hotel/office AC runs today, regardless of occupancy or weather.
+      <br>
+      <strong>CoolSense V2:</strong> occupancy-density mode selection + weather-driven BTU sizing, plus —
+      when outside conditions are <em>milder</em> than the 33°C/60%RH baseline — the setpoint relaxes
+      (warmer, less aggressive) within its mode's range, which legitimately draws less power. It never
+      tightens further when hot/humid; that heat load is already priced into its own weather multiplier,
+      so adjusting the setpoint too would double-count it.
     </div>
 
     <div class="grid3">
@@ -330,9 +331,15 @@
         <select id="simWeather">
           <option value="diurnal" selected>Diurnal (realistic day/night cycle)</option>
           <option value="cool">Cool (flat 27°C/55%)</option>
-          <option value="warm">Warm (flat 33°C/60% — CoolSense V2's own baseline, so it never diverges from the current model here)</option>
+          <option value="warm">Warm (flat 33°C/60% — CoolSense V2's own baseline)</option>
           <option value="hot">Hot (flat 38°C/75%)</option>
         </select>
+      </div>
+    </div>
+    <div class="grid3">
+      <div class="field">
+        <label for="simStaticTemp">Static baseline setpoint (°C)</label>
+        <input id="simStaticTemp" type="number" step="0.5" value="25" />
       </div>
     </div>
 
@@ -344,8 +351,7 @@
 
       <h3>Power over time (kW)</h3>
       <div class="chart-legend">
-        <span><span class="swatch" style="background:var(--series-current)"></span>Static (constant 25°C)</span>
-        <span><span class="swatch" style="background:var(--series-smart)"></span>Current model</span>
+        <span><span class="swatch" style="background:var(--series-current)"></span>Static</span>
         <span><span class="swatch" style="background:var(--series-v2)"></span>CoolSense V2</span>
       </div>
       <div class="chart-wrap" id="simPowerChartWrap">
@@ -355,8 +361,7 @@
 
       <h3>Cumulative energy (kWh)</h3>
       <div class="chart-legend">
-        <span><span class="swatch" style="background:var(--series-current)"></span>Static (constant 25°C)</span>
-        <span><span class="swatch" style="background:var(--series-smart)"></span>Current model</span>
+        <span><span class="swatch" style="background:var(--series-current)"></span>Static</span>
         <span><span class="swatch" style="background:var(--series-v2)"></span>CoolSense V2</span>
       </div>
       <div class="chart-wrap" id="simEnergyChartWrap">
@@ -748,122 +753,20 @@
     return res.json();
   }
 
-  // Raw per-hour occupancy behind a simulation run — simulation_hourly_data
-  // only stores the resulting power numbers, not the people_count that
-  // produced them, so CoolSense V2 (computed client-side) needs this
-  // to run against the exact same occupancy the backend used.
-  async function fetchMockOccupancy(durationHours) {
-    const base = document.getElementById('apiBase').value.replace(/\/$/, '');
-    const apiKey = document.getElementById('apiKey').value;
-    const restBase = base.replace(/\/functions\/v1$/, '/rest/v1');
-    const url = `${restBase}/occupancy_readings?source=eq.mock&order=captured_at.desc&limit=${durationHours}&select=people_count,captured_at`;
-    const res = await fetch(url, { headers: { apiKey, Authorization: `Bearer ${apiKey}` } });
-    if (!res.ok) throw new Error(`fetching occupancy_readings → HTTP ${res.status}`);
-    const rows = await res.json();
-    const ordered = rows.slice().reverse(); // oldest-first, matching hour_index order
-    return { peopleCounts: ordered.map(r => r.people_count), capturedAt: ordered.map(r => new Date(r.captured_at)) };
-  }
-
-  // ---- CoolSense V2: same mode/BTU/SEER logic as calculateAcSettings,
-  // plus a setpoint that relaxes (warmer, less power) when outside
-  // conditions are milder than baseline. Mirrors coolSenseV2Calculation.ts.
-  // Not tied to the editable `criteria` panel above — these ranges/factors
-  // are fixed to match the backend exactly.
-  const COOLSENSE_V2_MODE_TEMP_RANGE = {
-    eco: { min: 26, max: 28 },
-    moderate: { min: 22, max: 26 },
-    full: { min: 19, max: 23 },
-  };
-  const COOLSENSE_V2_TEMP_EASE_PER_C_BELOW_BASELINE = 0.3;
-  const COOLSENSE_V2_HUMIDITY_EASE_PER_PCT_BELOW_BASELINE = 0.02;
-  const COOLSENSE_V2_POWER_CHANGE_PER_DEGREE_C = 0.05;
-  const COOLSENSE_V2_MIN_POWER_MULTIPLIER = 0.5;
-
-  const WEATHER_CONDITION_PRESETS = {
-    cool: { tempC: 27, humidityPct: 55 },
-    warm: { tempC: 33, humidityPct: 60 },
-    hot: { tempC: 38, humidityPct: 75 },
-  };
-
-  // Continuous day/night cycle — mirrors simulation.ts's getDiurnalWeather.
-  // 24h cosine, trough at 3am (27°C/50%), peak at 3pm (36°C/80%).
-  const DIURNAL_PEAK_HOUR = 15;
-  const DIURNAL_MID_TEMP_C = 31.5;
-  const DIURNAL_TEMP_AMPLITUDE_C = 4.5;
-  const DIURNAL_MID_HUMIDITY_PCT = 65;
-  const DIURNAL_HUMIDITY_AMPLITUDE_PCT = 15;
-
-  function getDiurnalWeather(timestamp) {
-    const hour = timestamp.getHours() + timestamp.getMinutes() / 60;
-    const phase = (2 * Math.PI * (hour - DIURNAL_PEAK_HOUR)) / 24;
-    return {
-      tempC: DIURNAL_MID_TEMP_C + DIURNAL_TEMP_AMPLITUDE_C * Math.cos(phase),
-      humidityPct: DIURNAL_MID_HUMIDITY_PCT + DIURNAL_HUMIDITY_AMPLITUDE_PCT * Math.cos(phase),
-    };
-  }
-
-  function getWeatherForHour(weatherCondition, timestamp) {
-    if (weatherCondition === 'diurnal') return getDiurnalWeather(timestamp);
-    return WEATHER_CONDITION_PRESETS[weatherCondition];
-  }
-
-  function calculateCoolSenseV2Settings(peopleCount, roomSize, seer, outsideTempC, humidityPct) {
-    const base = calculateAcSettings(peopleCount, roomSize, seer, outsideTempC, humidityPct);
-    const range = COOLSENSE_V2_MODE_TEMP_RANGE[base.mode];
-
-    const tempEase = Math.max(0, COOLSENSE_V2_TEMP_EASE_PER_C_BELOW_BASELINE * (criteria.weatherBaselineTemp - outsideTempC));
-    const humidityEase = Math.max(0, COOLSENSE_V2_HUMIDITY_EASE_PER_PCT_BELOW_BASELINE * (criteria.weatherBaselineHumidity - humidityPct));
-
-    const adjusted_temp_c = Math.min(range.max, base.temperature_c + tempEase + humidityEase);
-    const appliedEase = adjusted_temp_c - base.temperature_c;
-
-    const powerEaseMultiplier = Math.max(COOLSENSE_V2_MIN_POWER_MULTIPLIER, 1 - COOLSENSE_V2_POWER_CHANGE_PER_DEGREE_C * appliedEase);
-    const btu_per_hr = base.btu_per_hr * powerEaseMultiplier;
-    const power_kw = btu_per_hr / (seer * 1000);
-
-    return { mode: base.mode, fan_speed: base.fan_speed, base_temp_c: base.temperature_c, adjusted_temp_c, power_kw, btu_per_hr };
-  }
-
-  function computeCoolSenseV2Hourly(peopleCounts, roomSize, seer, weatherCondition, capturedAt) {
-    let cumKwh = 0, cumCo2 = 0;
-    return peopleCounts.map((people, hour_index) => {
-      const weather = getWeatherForHour(weatherCondition, capturedAt[hour_index]);
-      const s = calculateCoolSenseV2Settings(people, roomSize, seer, weather.tempC, weather.humidityPct);
-      cumKwh += s.power_kw;
-      cumCo2 = cumKwh * 0.5;
-      return {
-        hour_index,
-        v2_power_kw: s.power_kw,
-        v2_cumulative_kwh: cumKwh,
-        v2_cumulative_co2: cumCo2,
-        v2_adjusted_temp_c: s.adjusted_temp_c,
-      };
-    });
-  }
-
   function fmtNum(n, digits) {
     return Number(n).toLocaleString(undefined, { maximumFractionDigits: digits ?? 1, minimumFractionDigits: 0 });
   }
 
-  function renderStats(summary, v2EnergyKwh) {
-    const v2Co2Kg = v2EnergyKwh * 0.5;
-    const v2CostBaht = v2EnergyKwh * 5;
-    const smartSaved = summary.current_energy_kwh - summary.smart_energy_kwh;
-    const v2Saved = summary.current_energy_kwh - v2EnergyKwh;
-    const v2PctReduction = summary.current_energy_kwh > 0 ? (v2Saved / summary.current_energy_kwh) * 100 : 0;
+  function renderStats(summary) {
     const tiles = [
       { label: 'Static energy', value: fmtNum(summary.current_energy_kwh) + ' kWh' },
-      { label: 'Current model energy', value: fmtNum(summary.smart_energy_kwh) + ' kWh' },
-      { label: 'CoolSense V2 energy', value: fmtNum(v2EnergyKwh) + ' kWh' },
-      { label: 'Current model % reduction', value: fmtNum(summary.pct_reduction) + '%' },
-      { label: 'CoolSense V2 % reduction', value: fmtNum(v2PctReduction) + '%' },
-      { label: 'CoolSense V2 extra savings vs current', value: fmtNum(summary.smart_energy_kwh - v2EnergyKwh) + ' kWh' },
+      { label: 'CoolSense V2 energy', value: fmtNum(summary.smart_energy_kwh) + ' kWh' },
+      { label: '% reduction', value: fmtNum(summary.pct_reduction) + '%' },
+      { label: 'Energy saved', value: fmtNum(summary.current_energy_kwh - summary.smart_energy_kwh) + ' kWh' },
       { label: 'Static CO₂', value: fmtNum(summary.current_co2_kg) + ' kg' },
-      { label: 'Current model CO₂', value: fmtNum(summary.smart_co2_kg) + ' kg' },
-      { label: 'CoolSense V2 CO₂', value: fmtNum(v2Co2Kg) + ' kg' },
+      { label: 'CoolSense V2 CO₂', value: fmtNum(summary.smart_co2_kg) + ' kg' },
       { label: 'Static cost', value: fmtNum(summary.current_cost_baht) + ' baht' },
-      { label: 'Current model cost', value: fmtNum(summary.smart_cost_baht) + ' baht' },
-      { label: 'CoolSense V2 cost', value: fmtNum(v2CostBaht) + ' baht' },
+      { label: 'CoolSense V2 cost', value: fmtNum(summary.smart_cost_baht) + ' baht' },
     ];
     document.getElementById('simStats').innerHTML = tiles.map(t =>
       `<div class="sim-stat"><div class="sim-stat-label">${t.label}</div><div class="sim-stat-value">${t.value}</div></div>`
@@ -875,16 +778,13 @@
       <td>${h.hour_index}</td>
       <td>${fmtNum(h.current_power_kw, 2)}</td>
       <td>${fmtNum(h.smart_power_kw, 2)}</td>
-      <td>${fmtNum(h.v2_power_kw, 2)}</td>
       <td>${fmtNum(h.current_cumulative_kwh, 1)}</td>
       <td>${fmtNum(h.smart_cumulative_kwh, 1)}</td>
-      <td>${fmtNum(h.v2_cumulative_kwh, 1)}</td>
-      <td>${fmtNum(h.v2_adjusted_temp_c, 1)}</td>
     </tr>`).join('');
     document.getElementById('simTable').innerHTML = `
       <thead><tr>
-        <th>Hour</th><th>Static kW</th><th>Current kW</th><th>CoolSense V2 kW</th>
-        <th>Static cum. kWh</th><th>Current cum. kWh</th><th>CoolSense V2 cum. kWh</th><th>CoolSense V2 temp °C</th>
+        <th>Hour</th><th>Static kW</th><th>CoolSense V2 kW</th>
+        <th>Static cum. kWh</th><th>CoolSense V2 cum. kWh</th>
       </tr></thead>
       <tbody>${rows}</tbody>`;
   }
@@ -975,34 +875,34 @@
     const durationHours = Math.max(1, parseInt(document.getElementById('simDuration').value, 10) || 168);
     const roomSize = document.getElementById('simRoomSize').value;
     const weatherCondition = document.getElementById('simWeather').value;
+    const staticTempC = parseFloat(document.getElementById('simStaticTemp').value);
+    const comfortPreference = document.getElementById('comfortPreference').value;
 
     try {
       const generated = await callFunction('simulation/generate-mock-data', { duration_hours: durationHours, room_size: roomSize });
       simLogStep(`generated ${generated.occupancy_reading_ids.length} mock occupancy readings`, true);
 
-      const run = await callFunction('simulation/run', { duration_hours: durationHours, room_size: roomSize, weather_condition: weatherCondition });
+      const run = await callFunction('simulation/run', {
+        duration_hours: durationHours,
+        room_size: roomSize,
+        weather_condition: weatherCondition,
+        static_temp_c: Number.isFinite(staticTempC) ? staticTempC : undefined,
+        comfort_preference: comfortPreference,
+      });
       simLogStep(`simulation_run ${run.simulation_run_id} saved (${fmtNum(run.summary.pct_reduction)}% reduction)`, true);
 
       const hourly = await fetchHourlyData(run.simulation_run_id);
       simLogStep(`loaded ${hourly.length} hourly rows for charting`, true);
 
-      const { peopleCounts, capturedAt } = await fetchMockOccupancy(durationHours);
-      const seer = 4.5; // matches the "Keep SEER at 4.5" spec for this comparison
-      const v2Hourly = computeCoolSenseV2Hourly(peopleCounts, roomSize, seer, weatherCondition, capturedAt);
-      simLogStep(`computed CoolSense V2 for ${v2Hourly.length} hours (client-side, weather: ${weatherCondition})`, true);
-
-      const merged = hourly.map((h, i) => ({ ...h, ...(v2Hourly[i] ?? {}) }));
-      const v2EnergyKwh = v2Hourly.length ? v2Hourly[v2Hourly.length - 1].v2_cumulative_kwh : 0;
-
       document.getElementById('simResults').style.display = 'block';
-      renderStats(run.summary, v2EnergyKwh);
-      renderChart('simPowerChart', 'simPowerTooltip', merged,
-        [{ key: 'current_power_kw', color: '#2a78d6' }, { key: 'smart_power_kw', color: '#eb6834' }, { key: 'v2_power_kw', color: '#1baf7a' }],
+      renderStats(run.summary);
+      renderChart('simPowerChart', 'simPowerTooltip', hourly,
+        [{ key: 'current_power_kw', color: '#2a78d6' }, { key: 'smart_power_kw', color: '#1baf7a' }],
         'line');
-      renderChart('simEnergyChart', 'simEnergyTooltip', merged,
-        [{ key: 'current_cumulative_kwh', color: '#2a78d6' }, { key: 'smart_cumulative_kwh', color: '#eb6834' }, { key: 'v2_cumulative_kwh', color: '#1baf7a' }],
+      renderChart('simEnergyChart', 'simEnergyTooltip', hourly,
+        [{ key: 'current_cumulative_kwh', color: '#2a78d6' }, { key: 'smart_cumulative_kwh', color: '#1baf7a' }],
         'area');
-      renderTable(merged);
+      renderTable(hourly);
     } catch (err) {
       simLogStep(err.message, false);
     }
