@@ -13,9 +13,18 @@ const props = withDefaults(
     series: ChartSeries[];
     mode?: 'line' | 'area';
     xKey?: string;
+    // Formats the x-axis tick + tooltip label from a data row. Defaults to
+    // the original "{hour_index}h" behavior so existing callers (Simulation,
+    // People) are unaffected.
+    formatX?: (row: Record<string, number>) => string;
   }>(),
-  { mode: 'line', xKey: 'hour_index' },
+  { mode: 'line', xKey: 'hour_index', formatX: undefined },
 );
+
+function xLabel(row: Record<string, number> | undefined, index: number): string {
+  if (!row) return `${index}h`;
+  return props.formatX ? props.formatX(row) : `${row[props.xKey] ?? index}h`;
+}
 
 const width = 680;
 const height = 240;
@@ -56,7 +65,7 @@ const xTicks = computed(() => {
   const step = Math.max(24, Math.ceil(n.value / 8 / 24) * 24);
   const ticks: { x: number; label: string }[] = [];
   for (let i = 0; i < n.value; i += step) {
-    ticks.push({ x: xAt(i), label: `${props.data[i]?.[props.xKey] ?? i}h` });
+    ticks.push({ x: xAt(i), label: xLabel(props.data[i], i) });
   }
   return ticks;
 });
@@ -180,7 +189,7 @@ const tooltipTopPct = computed(() => {
       :style="{ left: `${(hoverX / width) * 100}%`, top: `${tooltipTopPct}%` }"
     >
       <div class="text-on-surface-variant">
-        Hour {{ hoverRow[xKey] }}
+        {{ formatX ? formatX(hoverRow) : `Hour ${hoverRow[xKey]}` }}
       </div>
       <div
         v-for="s in series"
