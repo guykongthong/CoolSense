@@ -8,10 +8,9 @@ import { ROOM_IDS, type RoomId } from '../lib/rooms';
 // page. Several fields here have no backing data/schema yet:
 //   - "Select Room" (multi-room) — room_config is a single-room singleton today
 //   - "Active Device" block — no device table exists
-//   - "Cooling Capacity (BTU/h)" / "Inverter / Fixed Speed" / Korean-AC grade
-//     — not modeled in acCalculation.ts or room_config, and deliberately not
-//     wired (they'd change the algorithm, not just this form — see the
-//     CoolSense V4 design work if/when that lands). These stay local-only,
+//   - "Cooling Capacity (BTU/h)" / Korean-AC grade — not modeled in
+//     acCalculation.ts or room_config, and deliberately not wired (they'd
+//     change the algorithm, not just this form). These stay local-only,
 //     never sent to the backend.
 // Only the first device maps to the real room_config singleton — "Add
 // Device" stays decorative until multi-room/multi-device is actually
@@ -27,7 +26,6 @@ interface DeviceSpec {
   starRating: string;
   seerValue: string;
   coolingCapacity: string;
-  deviceType: 'inverter' | 'fixed';
   isKoreanAc: boolean;
   krEfficiencyGrade: string;
 }
@@ -40,7 +38,6 @@ function createDevice(): DeviceSpec {
     starRating: '',
     seerValue: '',
     coolingCapacity: '',
-    deviceType: 'inverter',
     isKoreanAc: false,
     krEfficiencyGrade: '',
   };
@@ -328,28 +325,6 @@ const fieldWrapClass =
                   placeholder="e.g. 12000"
                   class="w-full bg-transparent border-none focus:ring-0 text-on-surface text-body-md py-3 px-4"
                 >
-              </div>
-            </div>
-
-            <div class="space-y-3">
-              <label class="block font-medium text-on-surface">{{ t('information.inverterFixed') }}</label>
-              <div class="flex items-center gap-4">
-                <label class="flex items-center gap-2">
-                  <input
-                    v-model="device.deviceType"
-                    type="radio"
-                    value="inverter"
-                    class="accent-[#003527] w-4 h-4"
-                  > {{ t('information.inverter') }}
-                </label>
-                <label class="flex items-center gap-2">
-                  <input
-                    v-model="device.deviceType"
-                    type="radio"
-                    value="fixed"
-                    class="accent-[#003527] w-4 h-4"
-                  > {{ t('information.fixedSpeed') }}
-                </label>
               </div>
             </div>
           </div>
