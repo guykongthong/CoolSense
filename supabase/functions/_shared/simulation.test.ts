@@ -1,6 +1,13 @@
 import { assertAlmostEquals, assertEquals } from "jsr:@std/assert@1";
-import { calculateAcSettings, getAcMode, type RoomSize } from "./acCalculation.ts";
-import { CURRENT_SYSTEM_POWER_KW, generateMockOccupancy, getDiurnalWeather, runSimulation } from "./simulation.ts";
+import { getAcMode, type RoomSize } from "./acCalculation.ts";
+import { calculateCoolSenseV2Settings } from "./coolSenseV2Calculation.ts";
+import {
+  CURRENT_SYSTEM_POWER_KW,
+  DEFAULT_STATIC_TEMP_C,
+  generateMockOccupancy,
+  getDiurnalWeather,
+  runSimulation,
+} from "./simulation.ts";
 
 const noRandom = () => 0.5; // random()*2-1 = 0 → no noise
 const minRandom = () => 0; // noise = -15%
@@ -91,18 +98,35 @@ Deno.test("generateMockOccupancy: all people counts are non-negative integers", 
   }
 });
 
-Deno.test("runSimulation: current_energy_kwh is duration_hours × 4.5 regardless of occupancy", () => {
+Deno.test("runSimulation: current_energy_kwh is duration_hours × 4.5 at the default 25°C static baseline", () => {
   const { summary } = runSimulation([0, 0, 20, 20, 0], "medium", 4.5, "warm");
   assertEquals(summary.current_energy_kwh, 5 * CURRENT_SYSTEM_POWER_KW);
 });
 
-Deno.test("runSimulation: smart hourly power matches calculateAcSettings for that hour", () => {
+Deno.test("runSimulation: a colder static_temp_c raises current_power_kw; a warmer one lowers it", () => {
+  const cold = runSimulation([0], "medium", 4.5, "warm", undefined, 18);
+  const baseline = runSimulation([0], "medium", 4.5, "warm", undefined, DEFAULT_STATIC_TEMP_C);
+  const warm = runSimulation([0], "medium", 4.5, "warm", undefined, 28);
+  assertEquals(cold.hourly[0].current_power_kw > baseline.hourly[0].current_power_kw, true);
+  assertEquals(warm.hourly[0].current_power_kw < baseline.hourly[0].current_power_kw, true);
+  assertEquals(baseline.hourly[0].current_power_kw, CURRENT_SYSTEM_POWER_KW);
+});
+
+Deno.test("runSimulation: smart hourly power matches calculateCoolSenseV2Settings (CoolSense V2, not V1) for that hour", () => {
   const peopleCounts = [0, 5, 20];
   const { hourly } = runSimulation(peopleCounts, "medium", 4.5, "warm");
   peopleCounts.forEach((people, i) => {
-    const expected = calculateAcSettings(people, "medium", 4.5, 33, 60); // "warm" preset == baseline
+    const expected = calculateCoolSenseV2Settings(people, "medium", 4.5, 33, 60, "neutral"); // "warm" preset == baseline
     assertEquals(hourly[i].smart_power_kw, expected.power_kw);
   });
+});
+
+Deno.test("runSimulation: comfort_preference feeds through to CoolSense V2's smart power", () => {
+  const neutral = runSimulation([20], "medium", 4.5, "warm", undefined, DEFAULT_STATIC_TEMP_C, "neutral");
+  const cold = runSimulation([20], "medium", 4.5, "warm", undefined, DEFAULT_STATIC_TEMP_C, "cold");
+  const warmPref = runSimulation([20], "medium", 4.5, "warm", undefined, DEFAULT_STATIC_TEMP_C, "warm");
+  assertEquals(cold.hourly[0].smart_power_kw >= neutral.hourly[0].smart_power_kw, true);
+  assertEquals(neutral.hourly[0].smart_power_kw >= warmPref.hourly[0].smart_power_kw, true);
 });
 
 Deno.test("runSimulation: cumulative sums are monotonic and match the summary totals at the last hour", () => {
@@ -200,12 +224,12 @@ Deno.test("runSimulation: diurnal weather varies smart_power_kw by time of day e
   assertEquals(hourly[0].smart_power_kw < hourly[1].smart_power_kw, true);
 });
 
-Deno.test("runSimulation: diurnal weather at the exact peak/trough hours matches calculateAcSettings directly", () => {
+Deno.test("runSimulation: diurnal weather at the exact peak/trough hours matches calculateCoolSenseV2Settings directly", () => {
   const peopleCounts = [40, 40];
   const capturedAt = [new Date(2026, 7, 10, 3, 0, 0), new Date(2026, 7, 10, 15, 0, 0)];
   const { hourly } = runSimulation(peopleCounts, "medium", 4.5, "diurnal", capturedAt);
-  const trough = calculateAcSettings(40, "medium", 4.5, 27, 50);
-  const peak = calculateAcSettings(40, "medium", 4.5, 36, 80);
+  const trough = calculateCoolSenseV2Settings(40, "medium", 4.5, 27, 50, "neutral");
+  const peak = calculateCoolSenseV2Settings(40, "medium", 4.5, 36, 80, "neutral");
   assertAlmostEquals(hourly[0].smart_power_kw, trough.power_kw, 1e-9);
   assertAlmostEquals(hourly[1].smart_power_kw, peak.power_kw, 1e-9);
 });

@@ -3,14 +3,17 @@ import "@supabase/functions-js/edge-runtime.d.ts";
 import { withSupabase } from "@supabase/server";
 import type { SupabaseContext } from "@supabase/server";
 import { type RoomSize } from "../_shared/acCalculation.ts";
-import { generateMockOccupancy, runSimulation, type WeatherCondition } from "../_shared/simulation.ts";
+import { DEFAULT_STATIC_TEMP_C, generateMockOccupancy, runSimulation, type WeatherCondition } from "../_shared/simulation.ts";
+import type { ComfortPreference } from "../_shared/coolSenseV2Calculation.ts";
 
 const VALID_ROOM_SIZES = ["small", "medium", "large"];
 const VALID_WEATHER_CONDITIONS = ["hot", "warm", "cool", "diurnal"];
+const VALID_COMFORT_PREFERENCES = ["cold", "neutral", "warm"];
 const DEFAULT_DURATION_HOURS = 168;
 const DEFAULT_ROOM_SIZE: RoomSize = "medium";
 const DEFAULT_AC_SEER = 4.5;
 const DEFAULT_WEATHER_CONDITION: WeatherCondition = "warm";
+const DEFAULT_COMFORT_PREFERENCE: ComfortPreference = "neutral";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const RECENT_SIMULATIONS_LIMIT = 10;
 
@@ -20,6 +23,10 @@ function isRoomSize(value: unknown): value is RoomSize {
 
 function isWeatherCondition(value: unknown): value is WeatherCondition {
   return typeof value === "string" && VALID_WEATHER_CONDITIONS.includes(value);
+}
+
+function isComfortPreference(value: unknown): value is ComfortPreference {
+  return typeof value === "string" && VALID_COMFORT_PREFERENCES.includes(value);
 }
 
 interface GenerateMockDataBody {
@@ -96,6 +103,8 @@ interface RunSimulationBody {
   room_size?: string;
   ac_seer?: number;
   weather_condition?: string;
+  static_temp_c?: number;
+  comfort_preference?: string;
 }
 
 interface OccupancyReadingRow {
@@ -134,6 +143,19 @@ async function handleRun(req: Request, ctx: SupabaseContext): Promise<Response> 
     );
   }
 
+  const staticTempC = body.static_temp_c ?? DEFAULT_STATIC_TEMP_C;
+  if (typeof staticTempC !== "number" || !Number.isFinite(staticTempC)) {
+    return Response.json({ message: "static_temp_c must be a number" }, { status: 400 });
+  }
+
+  const comfortPreference = body.comfort_preference ?? DEFAULT_COMFORT_PREFERENCE;
+  if (!isComfortPreference(comfortPreference)) {
+    return Response.json(
+      { message: `comfort_preference must be one of ${VALID_COMFORT_PREFERENCES.join(", ")}` },
+      { status: 400 },
+    );
+  }
+
   // deno-lint-ignore no-explicit-any
   const db = ctx.supabaseAdmin as any;
   const { data: readings, error: readError } = await db
@@ -164,7 +186,15 @@ async function handleRun(req: Request, ctx: SupabaseContext): Promise<Response> 
   const peopleCounts = orderedReadings.map((r) => r.people_count);
   const capturedAt = orderedReadings.map((r) => new Date(r.captured_at));
 
-  const { hourly, summary } = runSimulation(peopleCounts, roomSize, acSeer, weatherCondition, capturedAt);
+  const { hourly, summary } = runSimulation(
+    peopleCounts,
+    roomSize,
+    acSeer,
+    weatherCondition,
+    capturedAt,
+    staticTempC,
+    comfortPreference,
+  );
 
   const { data: run, error: runError } = await db
     .from("simulation_runs")
@@ -177,6 +207,8 @@ async function handleRun(req: Request, ctx: SupabaseContext): Promise<Response> 
       current_cost_baht: summary.current_cost_baht,
       smart_cost_baht: summary.smart_cost_baht,
       pct_reduction: summary.pct_reduction,
+      static_temp_c: staticTempC,
+      comfort_preference: comfortPreference,
     })
     .select()
     .maybeSingle();
@@ -299,7 +331,7 @@ export default {
   curl -i --location --request POST 'http://127.0.0.1:54321/functions/v1/simulation/run' \
     --header 'apiKey: sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH' \
     --header 'Content-Type: application/json' \
-    --data '{"duration_hours":168,"room_size":"medium","weather_condition":"hot"}'
+    --data '{"duration_hours":168,"room_size":"medium","weather_condition":"hot","static_temp_c":25,"comfort_preference":"neutral"}'
 
   3. Then retrieve results using the simulation_run_id from step 2's response:
 

@@ -1,4 +1,5 @@
-import { calculateAcSettings, FULL_DENSITY, MODERATE_DENSITY, ROOM_SIZE_SQM, type RoomSize } from "./acCalculation.ts";
+import { FULL_DENSITY, MODERATE_DENSITY, ROOM_SIZE_SQM, type RoomSize } from "./acCalculation.ts";
+import { calculateCoolSenseV2Settings, type ComfortPreference } from "./coolSenseV2Calculation.ts";
 
 export type WeatherCondition = "hot" | "warm" | "cool" | "diurnal";
 
@@ -29,9 +30,29 @@ export interface SimulationSummary {
   pct_reduction: number;
 }
 
-// The "current system" baseline every simulation compares the smart system
-// against — always-on 25°C, fan 3, constant draw. See CLAUDE.md.
+// The "current system" (static) baseline every simulation compares
+// CoolSense V2 against — always-on, fan 3, constant draw. Historically a
+// fixed 25°C/4.5kW; the setpoint is now configurable (`staticTempC` on
+// runSimulation) so different naive baselines can be tested. 4.5kW is the
+// power at the default 25°C setpoint — see CLAUDE.md.
+export const DEFAULT_STATIC_TEMP_C = 25;
 export const CURRENT_SYSTEM_POWER_KW = 4.5;
+
+// A colder static setpoint needs proportionally more constant cooling
+// capacity to hold, and vice versa for warmer — same 5%/°C rate
+// coolSenseV2Calculation.ts uses for its own setpoint-to-power scaling, for
+// consistency. Floor mirrors that module's MIN_POWER_MULTIPLIER.
+const STATIC_POWER_CHANGE_PER_DEGREE_C = 0.05;
+const STATIC_MIN_POWER_MULTIPLIER = 0.5;
+
+function staticSystemPowerKw(staticTempC: number): number {
+  const degreesColderThanDefault = DEFAULT_STATIC_TEMP_C - staticTempC;
+  const multiplier = Math.max(
+    STATIC_MIN_POWER_MULTIPLIER,
+    1 + STATIC_POWER_CHANGE_PER_DEGREE_C * degreesColderThanDefault,
+  );
+  return CURRENT_SYSTEM_POWER_KW * multiplier;
+}
 
 // Thailand grid figures — see CLAUDE.md "Metrics Calculated".
 const CO2_PER_KWH = 0.5;
@@ -49,9 +70,10 @@ const WEATHER_CONDITION_PRESETS: Record<Exclude<WeatherCondition, "diurnal">, { 
 
 // A continuous day/night cycle instead of one flat value for the whole run —
 // "warm" and "hot" both sit at/above acCalculation.ts's own weather
-// baseline (33°C/60%), so with a flat preset the hybrid model's setpoint
+// baseline (33°C/60%), so with a flat preset CoolSense V2's setpoint
 // relaxation never has mild-enough conditions to fire and it collapses to
-// identical numbers as the current model for the entire simulation. Cosine
+// the same power draw it would have without any easing at all, for the
+// entire simulation. Cosine
 // curve, 24h period: temp/humidity trough at 3am, peak at 3pm — anchored to
 // the peer's example figures (cool morning ~27°C/50%, hot midday ~36°C/80%).
 const DIURNAL_PEAK_HOUR = 15;
@@ -155,11 +177,14 @@ export function generateMockOccupancy(
 }
 
 /**
- * Runs the current-vs-smart comparison over a sequence of hourly people
- * counts (oldest first). Pure function over already-fetched data — no DB
- * access — so it's independently testable and reusable regardless of where
- * the readings came from. `capturedAt` (same order/length as `peopleCounts`)
- * is only required when weatherCondition is "diurnal".
+ * Runs the static-vs-CoolSense-V2 comparison over a sequence of hourly
+ * people counts (oldest first). Pure function over already-fetched data —
+ * no DB access — so it's independently testable and reusable regardless of
+ * where the readings came from. `capturedAt` (same order/length as
+ * `peopleCounts`) is only required when weatherCondition is "diurnal".
+ * `staticTempC` configures the static/current baseline's setpoint (default
+ * 25°C); `comfortPreference` feeds CoolSense V2's ±2°C occupant offset
+ * (default neutral, since a simulation run has no single "occupant").
  */
 export function runSimulation(
   peopleCounts: number[],
@@ -167,8 +192,11 @@ export function runSimulation(
   seer: number,
   weatherCondition: WeatherCondition,
   capturedAt?: Date[],
+  staticTempC: number = DEFAULT_STATIC_TEMP_C,
+  comfortPreference: ComfortPreference = "neutral",
 ): { hourly: SimulationHourResult[]; summary: SimulationSummary } {
   const hourly: SimulationHourResult[] = [];
+  const staticPowerKw = staticSystemPowerKw(staticTempC);
 
   let currentCumulativeKwh = 0;
   let smartCumulativeKwh = 0;
@@ -177,17 +205,24 @@ export function runSimulation(
 
   peopleCounts.forEach((peopleCount, hour_index) => {
     const weather = getWeatherForHour(weatherCondition, capturedAt?.[hour_index]);
-    const smartSettings = calculateAcSettings(peopleCount, roomSize, seer, weather.tempC, weather.humidityPct);
+    const smartSettings = calculateCoolSenseV2Settings(
+      peopleCount,
+      roomSize,
+      seer,
+      weather.tempC,
+      weather.humidityPct,
+      comfortPreference,
+    );
 
     // Power (kW) sustained for a 1-hour slice == energy (kWh) for that hour.
-    currentCumulativeKwh += CURRENT_SYSTEM_POWER_KW;
+    currentCumulativeKwh += staticPowerKw;
     smartCumulativeKwh += smartSettings.power_kw;
     currentCumulativeCo2 = currentCumulativeKwh * CO2_PER_KWH;
     smartCumulativeCo2 = smartCumulativeKwh * CO2_PER_KWH;
 
     hourly.push({
       hour_index,
-      current_power_kw: CURRENT_SYSTEM_POWER_KW,
+      current_power_kw: staticPowerKw,
       smart_power_kw: smartSettings.power_kw,
       current_cumulative_kwh: currentCumulativeKwh,
       smart_cumulative_kwh: smartCumulativeKwh,
