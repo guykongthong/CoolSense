@@ -6,8 +6,11 @@ import type { SupabaseContext } from "@supabase/server";
 const VALID_ROOM_SIZES = ["small", "medium", "large"];
 const VALID_EGAT_LABELS = ["1", "2", "3", "4", "5", "premium"];
 const VALID_COMFORT_PREFERENCES = ["cold", "neutral", "warm"];
-const MIN_AC_SEER = 2.0;
-const MAX_AC_SEER = 6.0;
+// Real-world manufacturer SEER range — the live calculation runs CoolSense
+// V3 (STANDARD_SEER_V3 = 15), which is calibrated against actual SEER
+// units, not V2's placeholder-calibrated 2.0-6.0 reference scale.
+const MIN_AC_SEER = 13.0;
+const MAX_AC_SEER = 25.0;
 
 // Same rule the frontend uses to decide whether to show the EGAT field —
 // kept in sync so a direct API call can't bypass the "Thailand only" rule

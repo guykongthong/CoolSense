@@ -1,10 +1,14 @@
 import { type RoomSize } from "./acCalculation.ts";
-import { calculateCoolSenseV2Settings, type ComfortPreference } from "./coolSenseV2Calculation.ts";
+import { STANDARD_SEER_V3 } from "./acCalculationV3.ts";
+import type { ComfortPreference } from "./coolSenseV2Calculation.ts";
+import { calculateCoolSenseV3Settings } from "./coolSenseV3Calculation.ts";
 
 // TODO: ML JSON shape may change occupancy_readings columns.
 const DEFAULT_ROOM_SIZE: RoomSize = "medium";
 
-const DEFAULT_AC_SEER = 4.5;
+// CoolSense V3 (realistic SEER + BTU/m² physics) is what the live
+// calculation actually runs — see CLAUDE.md's "CoolSense V3" section.
+const DEFAULT_AC_SEER = STANDARD_SEER_V3;
 const DEFAULT_COMFORT_PREFERENCE: ComfortPreference = "neutral";
 // Matches acCalculation.ts's WEATHER_BASELINE_TEMP_C / WEATHER_BASELINE_HUMIDITY_PCT —
 // used when no weather reading has been fetched yet (weather multiplier = 1).
@@ -57,7 +61,7 @@ export function applyCapacityCeiling(
 
 /**
  * Reads the current room config + latest occupancy/weather readings, runs
- * CoolSense V2, and inserts a fresh ac_calculations row. Shared by the
+ * CoolSense V3, and inserts a fresh ac_calculations row. Shared by the
  * `calculation` endpoint (GET, on-demand) and `occupancy-vision` (fires
  * automatically after each camera-detected occupancy reading, so the AC
  * setting actually reacts to the camera instead of only updating when
@@ -99,10 +103,10 @@ export async function runCalculation(
   const comfortPreference = roomConfig?.comfort_preference ?? DEFAULT_COMFORT_PREFERENCE;
   const ratedCapacityBtuPerHr = roomConfig?.rated_capacity_btu_per_hr ?? null;
 
-  // CoolSense V2: base mode/BTU/weather calc, plus setpoint relaxation
-  // under mild weather and the occupant's comfort_preference. See
-  // supabase/functions/_shared/coolSenseV2Calculation.ts.
-  const settings = calculateCoolSenseV2Settings(
+  // CoolSense V3: realistic area+occupancy BTU/hr sizing (acCalculationV3.ts)
+  // plus setpoint relaxation under mild weather and the occupant's
+  // comfort_preference. See coolSenseV3Calculation.ts.
+  const settings = calculateCoolSenseV3Settings(
     peopleCount,
     roomSize,
     acSeer,

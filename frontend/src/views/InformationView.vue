@@ -66,7 +66,15 @@ const loading = ref(true);
 const saving = ref(false);
 const loadError = ref(false);
 const saveError = ref(false);
+const saveErrorMessage = ref('');
 const saveSuccess = ref(false);
+
+// Mirrors room-config's own MIN_AC_SEER/MAX_AC_SEER — real-world
+// manufacturer SEER range, now that the live calculation runs CoolSense V3
+// (realistic SEER + BTU/m² physics) instead of V2's placeholder-calibrated
+// STANDARD_SEER=4.5.
+const MIN_AC_SEER = 13;
+const MAX_AC_SEER = 25;
 
 const ROOM_SIZE_LABEL_KEY: Record<'s' | 'm' | 'l', string> = { s: 'common.small', m: 'common.medium', l: 'common.large' };
 const primaryDevice = computed(() => devices.value[0]);
@@ -95,25 +103,52 @@ onMounted(async () => {
   }
 });
 
+async function extractErrorMessage(e: unknown): Promise<string> {
+  // supabase-js throws a FunctionsHttpError whose `.context` is the raw
+  // Response — read the edge function's actual { message } body when
+  // available, so validation failures (e.g. SEER out of range) show the
+  // real reason instead of a generic "try again".
+  try {
+    const context = (e as { context?: Response })?.context;
+    if (context && typeof context.json === 'function') {
+      const body = await context.json();
+      if (typeof body?.message === 'string') return body.message;
+    }
+  } catch {
+    // fall through to the generic message below
+  }
+  return t('information.saveError');
+}
+
 async function saveDevice(idx: number) {
   // Only the first device is real (see note above) — others are local UI
   // state only, nothing to save.
   if (idx !== 0) return;
 
   const device = devices.value[0];
-  saving.value = true;
   saveError.value = false;
+  saveErrorMessage.value = '';
   saveSuccess.value = false;
+
+  const seer = Number(device.seerValue);
+  if (!device.seerValue || Number.isNaN(seer) || seer < MIN_AC_SEER || seer > MAX_AC_SEER) {
+    saveError.value = true;
+    saveErrorMessage.value = t('information.seerOutOfRange', { min: MIN_AC_SEER, max: MAX_AC_SEER });
+    return;
+  }
+
+  saving.value = true;
   try {
     await updateRoomConfig({
       room_size: LETTER_TO_ROOM_SIZE[device.roomSize],
-      ac_seer: Number(device.seerValue),
+      ac_seer: seer,
       egat_label: isThailand.value && device.starRating ? (device.starRating as '3' | '4' | '5') : null,
       rated_capacity_btu_per_hr: device.coolingCapacity ? Number(device.coolingCapacity) : null,
     });
     saveSuccess.value = true;
-  } catch {
+  } catch (e) {
     saveError.value = true;
+    saveErrorMessage.value = await extractErrorMessage(e);
   } finally {
     saving.value = false;
   }
@@ -352,7 +387,9 @@ const fieldWrapClass =
                   v-model="device.seerValue"
                   type="number"
                   step="0.1"
-                  placeholder="e.g. 15.0"
+                  min="13"
+                  max="25"
+                  placeholder="e.g. 16.0"
                   class="w-full bg-transparent border-none focus:ring-0 text-on-surface text-body-md py-3 px-4"
                 >
               </div>
@@ -380,7 +417,7 @@ const fieldWrapClass =
             <span
               v-if="idx === 0 && saveError"
               class="text-label-sm text-error"
-            >{{ t('information.saveError') }}</span>
+            >{{ saveErrorMessage }}</span>
             <span
               v-if="idx === 0 && saveSuccess"
               class="text-label-sm text-primary"
