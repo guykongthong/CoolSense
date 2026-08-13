@@ -1,0 +1,238 @@
+import { ref } from 'vue';
+
+export type Locale = 'en' | 'ko';
+
+const STORAGE_KEY = 'coolsense_locale';
+
+function initialLocale(): Locale {
+  const stored = localStorage.getItem(STORAGE_KEY);
+  return stored === 'ko' || stored === 'en' ? stored : 'en';
+}
+
+export const locale = ref<Locale>(initialLocale());
+
+export function setLocale(next: Locale) {
+  locale.value = next;
+  localStorage.setItem(STORAGE_KEY, next);
+}
+
+type Messages = Record<string, string>;
+
+const messages: Record<Locale, Messages> = {
+  en: {
+    'nav.people': 'People',
+    'nav.information': 'Information',
+    'nav.analytics': 'Analytics',
+    'nav.devices': 'Devices',
+    'nav.settings': 'Settings',
+    'nav.addDevice': 'Add Device',
+
+    'shell.tagline': 'Energy Monitor',
+    'shell.footerTagline': '© 2026 CoolSense. Sustainable energy for a better planet.',
+
+    'page.people.title': 'People',
+    'page.people.subtitle': 'Real-time occupancy tracking',
+    'page.information.title': 'Device Information',
+    'page.information.subtitle': 'Review and manage specific energy parameters for your connected appliances.',
+    'page.analytics.title': 'Analytics',
+    'page.analytics.subtitle': 'Before vs after CoolSense, at a glance',
+    'page.devices.title': 'Devices',
+    'page.devices.subtitle': 'Coming soon',
+    'common.comingSoon': 'Coming soon.',
+    'common.small': 'Small',
+    'common.medium': 'Medium',
+    'common.large': 'Large',
+
+    'rooms.mainHall': 'Main Hall',
+    'rooms.conferenceRoomA': 'Conference Room A',
+    'rooms.executiveOffice': 'Executive Office',
+    'rooms.serverRoom': 'Server Room',
+    'rooms.openOfficeNorth': 'Open Office North',
+    'rooms.cafeteria': 'Cafeteria',
+
+    'people.currentOccupancy': 'Current Occupancy',
+    'people.vsLastHour': 'vs last hour',
+    'people.peakOccupancyToday': 'Peak Occupancy Today',
+    'people.peakAt': 'At 14:30 PM',
+    'people.averageStayTime': 'Average Stay Time',
+    'people.minFromYesterday': '-5 min from yesterday',
+    'people.optimal': 'Optimal',
+    'people.activityTrend': '24h Activity Trend',
+    'people.now': 'Now',
+    'people.densityByZone': 'Density by Zone',
+    'people.capacity': 'Capacity: {n}',
+    'people.statusHighUsage': 'High Usage',
+    'people.statusOptimal': 'Optimal',
+    'people.statusLow': 'Low',
+
+    'information.roomContext': 'Room Context',
+    'information.selectRoom': 'Select Room',
+    'information.activeDevice': 'Active Device',
+    'information.online': 'Online',
+    'information.hvacUnit': 'HVAC Unit - AC01',
+    'information.lastSynced': 'Last synced: 2 mins ago',
+    'information.technicalSpecifications': 'Technical Specifications',
+    'information.device': 'Device {n}',
+    'information.remove': 'Remove',
+    'information.roomSize': 'Room Size',
+    'information.energyLabel': 'Energy Label / Star Rating',
+    'information.starsHint': '(No.5, 3~5 Stars)',
+    'information.selectStars': 'Select Stars',
+    'information.stars': '{n} Stars',
+    'information.seerValue': 'SEER Value',
+    'information.coolingCapacity': 'Cooling Capacity',
+    'information.btuHint': '(BTU/h)',
+    'information.inverterFixed': 'Inverter / Fixed Speed',
+    'information.inverter': 'Inverter',
+    'information.fixedSpeed': 'Fixed Speed',
+    'information.save': 'Save Specifications',
+    'information.addDevice': 'Add Air Conditioner',
+    'information.koreanAc': 'This is a Korean-market air conditioner',
+    'information.krEfficiencyGrade': 'Energy Consumption Efficiency Grade',
+    'information.selectGrade': 'Select Grade',
+    'information.grade': 'Grade {n}',
+
+    'analytics.rooms': 'Rooms',
+    'analytics.currentEnergy': 'Current Energy',
+    'analytics.smartEnergy': 'Smart Energy',
+    'analytics.energySaved': 'Energy Saved',
+    'analytics.pctReduction': '% Reduction',
+    'analytics.co2Saved': 'CO₂ Saved',
+    'analytics.costSaved': 'Cost Saved',
+    'analytics.powerOverTime': 'Power over time (kW)',
+    'analytics.cumulativeEnergy': 'Cumulative energy (kWh)',
+    'analytics.currentLegend': 'Current (constant 25°C)',
+    'analytics.smartLegend': 'Smart system',
+    'analytics.tableView': 'Table view (all hours)',
+    'analytics.hour': 'Hour',
+    'analytics.currentKw': 'Current (kW)',
+    'analytics.smartKw': 'Smart (kW)',
+    'analytics.currentCumKwh': 'Current cum. (kWh)',
+    'analytics.smartCumKwh': 'Smart cum. (kWh)',
+    'analytics.comparisonSettings': 'Comparison Settings',
+    'analytics.duration': 'Duration (hours)',
+    'analytics.roomSize': 'Room size',
+    'analytics.weather': 'Weather',
+    'analytics.diurnal': 'Diurnal (day/night cycle)',
+    'analytics.cool': 'Cool',
+    'analytics.warm': 'Warm',
+    'analytics.hot': 'Hot',
+    'analytics.acSeer': 'AC SEER',
+    'analytics.runButton': 'Generate & Run Against Live Backend',
+    'analytics.running': 'Running…',
+    'analytics.errorFallback': 'Failed to run comparison — showing mock data instead',
+  },
+  ko: {
+    'nav.people': '인원',
+    'nav.information': '정보',
+    'nav.analytics': '분석',
+    'nav.devices': '기기',
+    'nav.settings': '설정',
+    'nav.addDevice': '기기 추가',
+
+    'shell.tagline': '에너지 모니터',
+    'shell.footerTagline': '© 2026 CoolSense. 더 나은 지구를 위한 지속가능한 에너지.',
+
+    'page.people.title': '인원',
+    'page.people.subtitle': '실시간 재실 인원 추적',
+    'page.information.title': '기기 정보',
+    'page.information.subtitle': '연결된 기기의 에너지 관련 세부 사양을 확인하고 관리하세요.',
+    'page.analytics.title': '분석',
+    'page.analytics.subtitle': 'CoolSense 적용 전후를 한눈에',
+    'page.devices.title': '기기',
+    'page.devices.subtitle': '준비 중',
+    'common.comingSoon': '준비 중입니다.',
+    'common.small': '소형',
+    'common.medium': '중형',
+    'common.large': '대형',
+
+    'rooms.mainHall': '메인 홀',
+    'rooms.conferenceRoomA': '회의실 A',
+    'rooms.executiveOffice': '임원실',
+    'rooms.serverRoom': '서버실',
+    'rooms.openOfficeNorth': '오픈 오피스 노스',
+    'rooms.cafeteria': '카페테리아',
+
+    'people.currentOccupancy': '현재 인원',
+    'people.vsLastHour': '지난 시간 대비',
+    'people.peakOccupancyToday': '오늘 최대 인원',
+    'people.peakAt': '오후 2시 30분 기준',
+    'people.averageStayTime': '평균 체류 시간',
+    'people.minFromYesterday': '어제보다 5분 감소',
+    'people.optimal': '최적',
+    'people.activityTrend': '24시간 활동 추이',
+    'people.now': '지금',
+    'people.densityByZone': '구역별 밀집도',
+    'people.capacity': '수용 인원: {n}',
+    'people.statusHighUsage': '사용량 높음',
+    'people.statusOptimal': '최적',
+    'people.statusLow': '낮음',
+
+    'information.roomContext': '방 정보',
+    'information.selectRoom': '방 선택',
+    'information.activeDevice': '활성 기기',
+    'information.online': '온라인',
+    'information.hvacUnit': 'HVAC 장치 - AC01',
+    'information.lastSynced': '2분 전 동기화됨',
+    'information.technicalSpecifications': '기술 사양',
+    'information.device': '기기 {n}',
+    'information.remove': '삭제',
+    'information.roomSize': '방 크기',
+    'information.energyLabel': '에너지 라벨 / 별점',
+    'information.starsHint': '(5호, 3~5성)',
+    'information.selectStars': '별점 선택',
+    'information.stars': '별 {n}개',
+    'information.seerValue': 'SEER 값',
+    'information.coolingCapacity': '냉방 용량',
+    'information.btuHint': '(BTU/h)',
+    'information.inverterFixed': '인버터 / 정속형',
+    'information.inverter': '인버터',
+    'information.fixedSpeed': '정속형',
+    'information.save': '사양 저장',
+    'information.addDevice': '에어컨 추가',
+    'information.koreanAc': '한국산(국내 판매) 에어컨입니다',
+    'information.krEfficiencyGrade': '에너지소비효율등급',
+    'information.selectGrade': '등급 선택',
+    'information.grade': '{n}등급',
+
+    'analytics.rooms': '방 목록',
+    'analytics.currentEnergy': '현재 에너지',
+    'analytics.smartEnergy': '스마트 에너지',
+    'analytics.energySaved': '절감 에너지',
+    'analytics.pctReduction': '절감률',
+    'analytics.co2Saved': 'CO₂ 절감',
+    'analytics.costSaved': '비용 절감',
+    'analytics.powerOverTime': '시간별 전력 (kW)',
+    'analytics.cumulativeEnergy': '누적 에너지 (kWh)',
+    'analytics.currentLegend': '현재 (상시 25°C)',
+    'analytics.smartLegend': '스마트 시스템',
+    'analytics.tableView': '표로 보기 (전체 시간)',
+    'analytics.hour': '시간',
+    'analytics.currentKw': '현재 (kW)',
+    'analytics.smartKw': '스마트 (kW)',
+    'analytics.currentCumKwh': '현재 누적 (kWh)',
+    'analytics.smartCumKwh': '스마트 누적 (kWh)',
+    'analytics.comparisonSettings': '비교 설정',
+    'analytics.duration': '기간 (시간)',
+    'analytics.roomSize': '방 크기',
+    'analytics.weather': '날씨',
+    'analytics.diurnal': '일교차 (주야 변화)',
+    'analytics.cool': '서늘함',
+    'analytics.warm': '따뜻함',
+    'analytics.hot': '더움',
+    'analytics.acSeer': '에어컨 SEER',
+    'analytics.runButton': '실제 백엔드로 생성 및 실행',
+    'analytics.running': '실행 중…',
+    'analytics.errorFallback': '비교 실행 실패 — 목업 데이터를 표시합니다',
+  },
+};
+
+export function t(key: string, vars?: Record<string, string | number>): string {
+  let text = messages[locale.value][key] ?? messages.en[key] ?? key;
+  if (vars) {
+    for (const [name, value] of Object.entries(vars)) {
+      text = text.replace(`{${name}}`, String(value));
+    }
+  }
+  return text;
+}
