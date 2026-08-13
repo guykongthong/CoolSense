@@ -1,6 +1,7 @@
 import { assertAlmostEquals, assertEquals } from "jsr:@std/assert@1";
 import { getAcMode, type RoomSize } from "./acCalculation.ts";
 import { calculateCoolSenseV2Settings } from "./coolSenseV2Calculation.ts";
+import { calculateCoolSenseV3Settings } from "./coolSenseV3Calculation.ts";
 import {
   CURRENT_SYSTEM_POWER_KW,
   DEFAULT_STATIC_TEMP_C,
@@ -232,4 +233,82 @@ Deno.test("runSimulation: diurnal weather at the exact peak/trough hours matches
   const peak = calculateCoolSenseV2Settings(40, "medium", 4.5, 36, 80, "neutral");
   assertAlmostEquals(hourly[0].smart_power_kw, trough.power_kw, 1e-9);
   assertAlmostEquals(hourly[1].smart_power_kw, peak.power_kw, 1e-9);
+});
+
+// ---- CoolSense V3 / static-v3 baseline ----
+
+Deno.test("runSimulation: static_v3 baseline scales with room size (small < medium < large) at default static temp", () => {
+  const small = runSimulation([0], "small", 15, "warm");
+  const medium = runSimulation([0], "medium", 15, "warm");
+  const large = runSimulation([0], "large", 15, "warm");
+  assertEquals(small.hourly[0].static_v3_power_kw < medium.hourly[0].static_v3_power_kw, true);
+  assertEquals(medium.hourly[0].static_v3_power_kw < large.hourly[0].static_v3_power_kw, true);
+});
+
+Deno.test("runSimulation: static_v3 baseline at default static_temp_c (25°C, clamped to full mode's 21°C) equals the full-occupancy V3 power exactly", () => {
+  // medium room: full-mode implied occupancy = ceil(0.15 * 275) = 42 people.
+  // 25°C is warmer than full mode's 21°C base, so it clamps to 21°C — no
+  // multiplier adjustment (degreesColderThanFullModeBase = 0).
+  const { hourly } = runSimulation([0], "medium", 15, "warm", undefined, DEFAULT_STATIC_TEMP_C);
+  const worstCase = calculateCoolSenseV3Settings(42, "medium", 15, 33, 60, "neutral");
+  assertAlmostEquals(hourly[0].static_v3_power_kw, worstCase.power_kw, 1e-9);
+});
+
+Deno.test("runSimulation: a static_temp_c colder than full mode's base (21°C) raises static_v3 power further", () => {
+  const default25 = runSimulation([0], "medium", 15, "warm", undefined, DEFAULT_STATIC_TEMP_C);
+  const colder18 = runSimulation([0], "medium", 15, "warm", undefined, 18);
+  assertEquals(colder18.hourly[0].static_v3_power_kw > default25.hourly[0].static_v3_power_kw, true);
+});
+
+Deno.test("runSimulation: CoolSense V3 hourly power matches calculateCoolSenseV3Settings for that hour", () => {
+  const peopleCounts = [0, 5, 20];
+  const { hourly } = runSimulation(peopleCounts, "medium", 15, "warm");
+  peopleCounts.forEach((people, i) => {
+    const expected = calculateCoolSenseV3Settings(people, "medium", 15, 33, 60, "neutral"); // "warm" preset == baseline
+    assertEquals(hourly[i].coolsense_v3_power_kw, expected.power_kw);
+  });
+});
+
+Deno.test("runSimulation: CoolSense V3 (neutral comfort) never exceeds the static-v3 baseline, even at full occupancy", () => {
+  // large room, full-mode implied occupancy = ceil(0.15*450) = 68 people, baseline weather.
+  const { hourly } = runSimulation([68], "large", 15, "warm", undefined, DEFAULT_STATIC_TEMP_C, "neutral");
+  assertEquals(hourly[0].coolsense_v3_power_kw <= hourly[0].static_v3_power_kw, true);
+});
+
+Deno.test("runSimulation: static_v3 and coolsense_v3 cumulative sums are monotonic and match the summary totals at the last hour", () => {
+  const { hourly, summary } = runSimulation([0, 5, 10, 20, 3], "medium", 15, "hot");
+  for (let i = 1; i < hourly.length; i++) {
+    assertEquals(hourly[i].static_v3_cumulative_kwh >= hourly[i - 1].static_v3_cumulative_kwh, true);
+    assertEquals(hourly[i].coolsense_v3_cumulative_kwh >= hourly[i - 1].coolsense_v3_cumulative_kwh, true);
+  }
+  const last = hourly[hourly.length - 1];
+  assertAlmostEquals(last.static_v3_cumulative_kwh, summary.static_v3_energy_kwh, 1e-9);
+  assertAlmostEquals(last.coolsense_v3_cumulative_kwh, summary.coolsense_v3_energy_kwh, 1e-9);
+});
+
+Deno.test("runSimulation: v3 CO2 and cost use the Thailand grid figures (0.5 kg/kWh, 5 baht/kWh)", () => {
+  const { summary } = runSimulation([0, 0, 0], "medium", 15, "warm");
+  assertEquals(summary.static_v3_co2_kg, summary.static_v3_energy_kwh * 0.5);
+  assertEquals(summary.static_v3_cost_baht, summary.static_v3_energy_kwh * 5);
+  assertEquals(summary.coolsense_v3_co2_kg, summary.coolsense_v3_energy_kwh * 0.5);
+  assertEquals(summary.coolsense_v3_cost_baht, summary.coolsense_v3_energy_kwh * 5);
+});
+
+Deno.test("runSimulation: v3_pct_reduction is positive across a realistic mixed-occupancy week", () => {
+  const readings = generateMockOccupancy(168, "medium", { now: new Date(2026, 7, 10, 0, 0, 0), random: () => 0.5 });
+  const { summary } = runSimulation(readings.map((r) => r.people_count), "medium", 15, "warm");
+  assertEquals(summary.coolsense_v3_energy_kwh < summary.static_v3_energy_kwh, true);
+  assertEquals(summary.v3_pct_reduction > 0, true);
+  assertAlmostEquals(
+    summary.v3_pct_reduction,
+    ((summary.static_v3_energy_kwh - summary.coolsense_v3_energy_kwh) / summary.static_v3_energy_kwh) * 100,
+    1e-9,
+  );
+});
+
+Deno.test("runSimulation: empty input produces a zeroed-out v3 summary too, not a crash", () => {
+  const { summary } = runSimulation([], "medium", 15, "warm");
+  assertEquals(summary.static_v3_energy_kwh, 0);
+  assertEquals(summary.coolsense_v3_energy_kwh, 0);
+  assertEquals(summary.v3_pct_reduction, 0);
 });

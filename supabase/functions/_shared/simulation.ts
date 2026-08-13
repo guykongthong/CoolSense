@@ -1,5 +1,7 @@
 import { FULL_DENSITY, MODERATE_DENSITY, ROOM_SIZE_SQM, type RoomSize } from "./acCalculation.ts";
+import { calculateAcSettingsV3 } from "./acCalculationV3.ts";
 import { calculateCoolSenseV2Settings, type ComfortPreference } from "./coolSenseV2Calculation.ts";
+import { calculateCoolSenseV3Settings } from "./coolSenseV3Calculation.ts";
 
 export type WeatherCondition = "hot" | "warm" | "cool" | "diurnal";
 
@@ -17,6 +19,12 @@ export interface SimulationHourResult {
   smart_cumulative_kwh: number;
   current_cumulative_co2: number;
   smart_cumulative_co2: number;
+  static_v3_power_kw: number;
+  coolsense_v3_power_kw: number;
+  static_v3_cumulative_kwh: number;
+  coolsense_v3_cumulative_kwh: number;
+  static_v3_cumulative_co2: number;
+  coolsense_v3_cumulative_co2: number;
 }
 
 export interface SimulationSummary {
@@ -28,6 +36,13 @@ export interface SimulationSummary {
   current_cost_baht: number;
   smart_cost_baht: number;
   pct_reduction: number;
+  static_v3_energy_kwh: number;
+  coolsense_v3_energy_kwh: number;
+  static_v3_co2_kg: number;
+  coolsense_v3_co2_kg: number;
+  static_v3_cost_baht: number;
+  coolsense_v3_cost_baht: number;
+  v3_pct_reduction: number;
 }
 
 // The "current system" (static) baseline every simulation compares
@@ -52,6 +67,27 @@ function staticSystemPowerKw(staticTempC: number): number {
     1 + STATIC_POWER_CHANGE_PER_DEGREE_C * degreesColderThanDefault,
   );
   return CURRENT_SYSTEM_POWER_KW * multiplier;
+}
+
+// The static-v3 baseline for the CoolSense V3 comparison: sized for the
+// room's full-mode occupancy (never under-capacity for real peak load), and
+// never backs off below what that peak load requires — a naive system
+// doesn't adapt to actual occupancy, so its effective setpoint can't be
+// milder than what full occupancy already demands. `staticTempC` can still
+// push it COLDER than full mode's own base temp (an explicitly configured
+// aggressive baseline), which raises power further; it just can't make the
+// baseline complacently warmer than what peak crowding needs. Reuses the
+// same 5%/°C scaling rate and floor as staticSystemPowerKw, for consistency.
+function staticV3PowerKw(roomSize: RoomSize, seer: number, staticTempC: number): number {
+  const fullOccupancyPeople = Math.ceil(FULL_DENSITY * ROOM_SIZE_SQM[roomSize]);
+  const worstCase = calculateAcSettingsV3(fullOccupancyPeople, roomSize, seer);
+  const effectiveStaticTempC = Math.min(staticTempC, worstCase.temperature_c);
+  const degreesColderThanFullModeBase = worstCase.temperature_c - effectiveStaticTempC;
+  const multiplier = Math.max(
+    STATIC_MIN_POWER_MULTIPLIER,
+    1 + STATIC_POWER_CHANGE_PER_DEGREE_C * degreesColderThanFullModeBase,
+  );
+  return worstCase.power_kw * multiplier;
 }
 
 // Thailand grid figures — see CLAUDE.md "Metrics Calculated".
@@ -197,15 +233,28 @@ export function runSimulation(
 ): { hourly: SimulationHourResult[]; summary: SimulationSummary } {
   const hourly: SimulationHourResult[] = [];
   const staticPowerKw = staticSystemPowerKw(staticTempC);
+  const staticV3Kw = staticV3PowerKw(roomSize, seer, staticTempC);
 
   let currentCumulativeKwh = 0;
   let smartCumulativeKwh = 0;
   let currentCumulativeCo2 = 0;
   let smartCumulativeCo2 = 0;
+  let staticV3CumulativeKwh = 0;
+  let coolsenseV3CumulativeKwh = 0;
+  let staticV3CumulativeCo2 = 0;
+  let coolsenseV3CumulativeCo2 = 0;
 
   peopleCounts.forEach((peopleCount, hour_index) => {
     const weather = getWeatherForHour(weatherCondition, capturedAt?.[hour_index]);
     const smartSettings = calculateCoolSenseV2Settings(
+      peopleCount,
+      roomSize,
+      seer,
+      weather.tempC,
+      weather.humidityPct,
+      comfortPreference,
+    );
+    const v3Settings = calculateCoolSenseV3Settings(
       peopleCount,
       roomSize,
       seer,
@@ -220,6 +269,11 @@ export function runSimulation(
     currentCumulativeCo2 = currentCumulativeKwh * CO2_PER_KWH;
     smartCumulativeCo2 = smartCumulativeKwh * CO2_PER_KWH;
 
+    staticV3CumulativeKwh += staticV3Kw;
+    coolsenseV3CumulativeKwh += v3Settings.power_kw;
+    staticV3CumulativeCo2 = staticV3CumulativeKwh * CO2_PER_KWH;
+    coolsenseV3CumulativeCo2 = coolsenseV3CumulativeKwh * CO2_PER_KWH;
+
     hourly.push({
       hour_index,
       current_power_kw: staticPowerKw,
@@ -228,12 +282,22 @@ export function runSimulation(
       smart_cumulative_kwh: smartCumulativeKwh,
       current_cumulative_co2: currentCumulativeCo2,
       smart_cumulative_co2: smartCumulativeCo2,
+      static_v3_power_kw: staticV3Kw,
+      coolsense_v3_power_kw: v3Settings.power_kw,
+      static_v3_cumulative_kwh: staticV3CumulativeKwh,
+      coolsense_v3_cumulative_kwh: coolsenseV3CumulativeKwh,
+      static_v3_cumulative_co2: staticV3CumulativeCo2,
+      coolsense_v3_cumulative_co2: coolsenseV3CumulativeCo2,
     });
   });
 
   const current_energy_kwh = currentCumulativeKwh;
   const smart_energy_kwh = smartCumulativeKwh;
   const energySaved = current_energy_kwh - smart_energy_kwh;
+
+  const static_v3_energy_kwh = staticV3CumulativeKwh;
+  const coolsense_v3_energy_kwh = coolsenseV3CumulativeKwh;
+  const v3EnergySaved = static_v3_energy_kwh - coolsense_v3_energy_kwh;
 
   const summary: SimulationSummary = {
     duration_hours: peopleCounts.length,
@@ -244,6 +308,13 @@ export function runSimulation(
     current_cost_baht: current_energy_kwh * COST_PER_KWH_BAHT,
     smart_cost_baht: smart_energy_kwh * COST_PER_KWH_BAHT,
     pct_reduction: current_energy_kwh > 0 ? (energySaved / current_energy_kwh) * 100 : 0,
+    static_v3_energy_kwh,
+    coolsense_v3_energy_kwh,
+    static_v3_co2_kg: static_v3_energy_kwh * CO2_PER_KWH,
+    coolsense_v3_co2_kg: coolsense_v3_energy_kwh * CO2_PER_KWH,
+    static_v3_cost_baht: static_v3_energy_kwh * COST_PER_KWH_BAHT,
+    coolsense_v3_cost_baht: coolsense_v3_energy_kwh * COST_PER_KWH_BAHT,
+    v3_pct_reduction: static_v3_energy_kwh > 0 ? (v3EnergySaved / static_v3_energy_kwh) * 100 : 0,
   };
 
   return { hourly, summary };
