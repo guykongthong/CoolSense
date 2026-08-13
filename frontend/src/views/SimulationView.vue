@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue';
 import Card from '../components/ui/Card.vue';
 import StatCard from '../components/ui/StatCard.vue';
+import ComparisonSection from '../components/ui/ComparisonSection.vue';
 import LineAreaChart from '../components/ui/LineAreaChart.vue';
 import { t } from '../lib/i18n';
 import { ROOM_IDS, type RoomId } from '../lib/rooms';
@@ -30,6 +31,11 @@ const MODE_KW = { eco: 0.5, moderate: 2.5, full: 4.5 };
 // Replaced immediately once "Generate & Run Comparison" succeeds.
 const STATIC_V3_KW = 2.75;
 const MODE_V3_KW = { eco: 1.0, moderate: 1.8, full: 3.5 };
+// Mirrors supabase/functions/_shared/simulation.ts's APP_BASELINE_KWH_PER_DAY /
+// APP_PER_RUN_OVERHEAD_KWH, for this client-side preview only — replaced by
+// the real backend-computed value once "Generate & Run Comparison" succeeds.
+const APP_BASELINE_KWH_PER_DAY = 0.1051;
+const APP_PER_RUN_OVERHEAD_KWH = 0.00185;
 
 // No backend/session dependency for the initial view — generates a
 // plausible 168h current-vs-smart dataset client-side, using the same
@@ -90,6 +96,9 @@ function generateMockComparison(durationHours: number): { hourly: SimulationHour
 
   const energySaved = currentCum - smartCum;
   const v3EnergySaved = staticV3Cum - smartV3Cum;
+  const appEnergyKwh =
+    durationHours > 0 ? (APP_BASELINE_KWH_PER_DAY / 24) * durationHours + APP_PER_RUN_OVERHEAD_KWH : 0;
+  const netEnergySavedKwh = v3EnergySaved - appEnergyKwh;
   const summary: SimulationSummary = {
     duration_hours: durationHours,
     current_energy_kwh: currentCum,
@@ -106,6 +115,10 @@ function generateMockComparison(durationHours: number): { hourly: SimulationHour
     static_v3_cost_baht: staticV3Cum * COST_PER_KWH_BAHT,
     coolsense_v3_cost_baht: smartV3Cum * COST_PER_KWH_BAHT,
     v3_pct_reduction: staticV3Cum > 0 ? (v3EnergySaved / staticV3Cum) * 100 : 0,
+    app_energy_kwh: appEnergyKwh,
+    net_energy_saved_kwh: netEnergySavedKwh,
+    net_co2_saved_kg: netEnergySavedKwh * CO2_PER_KWH,
+    net_cost_saved_baht: netEnergySavedKwh * COST_PER_KWH_BAHT,
   };
 
   return { hourly, summary };
@@ -180,56 +193,10 @@ async function handleGenerateAndRun() {
     </aside>
 
     <div class="flex-1 min-w-0 flex flex-col gap-6">
-      <div
+      <ComparisonSection
         v-if="summary"
-        class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4"
-      >
-        <StatCard
-          :label="t('simulation.currentEnergy')"
-          :value="`${summary.current_energy_kwh.toFixed(0)} kWh`"
-          value-size="headline"
-        />
-        <StatCard
-          :label="t('simulation.smartEnergy')"
-          :value="`${summary.smart_energy_kwh.toFixed(1)} kWh`"
-          value-size="headline"
-        />
-        <StatCard
-          :label="t('simulation.energySaved')"
-          :value="`${(summary.current_energy_kwh - summary.smart_energy_kwh).toFixed(1)} kWh`"
-          value-size="headline"
-        />
-        <StatCard
-          :label="t('simulation.pctReduction')"
-          :value="`${summary.pct_reduction.toFixed(1)}%`"
-          value-size="headline"
-        />
-        <StatCard
-          :label="t('simulation.co2Saved')"
-          :value="`${(summary.current_co2_kg - summary.smart_co2_kg).toFixed(1)} kg`"
-          value-size="headline"
-        />
-        <StatCard
-          :label="t('simulation.costSaved')"
-          :value="`${(summary.current_cost_baht - summary.smart_cost_baht).toFixed(1)} baht`"
-          value-size="headline"
-        />
-        <StatCard
-          :label="t('simulation.v3Energy')"
-          :value="`${summary.coolsense_v3_energy_kwh.toFixed(1)} kWh`"
-          value-size="headline"
-        />
-        <StatCard
-          :label="t('simulation.v3EnergySaved')"
-          :value="`${(summary.static_v3_energy_kwh - summary.coolsense_v3_energy_kwh).toFixed(1)} kWh`"
-          value-size="headline"
-        />
-        <StatCard
-          :label="t('simulation.v3PctReduction')"
-          :value="`${summary.v3_pct_reduction.toFixed(1)}%`"
-          value-size="headline"
-        />
-      </div>
+        :summary="summary"
+      />
 
       <Card :title="t('simulation.powerOverTime')">
         <LineAreaChart
@@ -246,6 +213,65 @@ async function handleGenerateAndRun() {
           :series="chartSeries.energy"
         />
       </Card>
+
+      <details
+        v-if="summary"
+        class="bg-white rounded-xl border border-slate-200 shadow-[0_4px_20px_rgba(6,78,59,0.05)] p-4"
+      >
+        <summary class="cursor-pointer text-label-md text-on-surface select-none">
+          {{ t('simulation.advancedDetails') }}
+        </summary>
+        <p class="text-label-sm text-on-surface-variant mt-2 mb-4">
+          {{ t('simulation.advancedDetailsSubtitle') }}
+        </p>
+        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+          <StatCard
+            :label="t('simulation.currentEnergy')"
+            :value="`${summary.current_energy_kwh.toFixed(0)} kWh`"
+            value-size="headline"
+          />
+          <StatCard
+            :label="t('simulation.smartEnergy')"
+            :value="`${summary.smart_energy_kwh.toFixed(1)} kWh`"
+            value-size="headline"
+          />
+          <StatCard
+            :label="t('simulation.energySaved')"
+            :value="`${(summary.current_energy_kwh - summary.smart_energy_kwh).toFixed(1)} kWh`"
+            value-size="headline"
+          />
+          <StatCard
+            :label="t('simulation.pctReduction')"
+            :value="`${summary.pct_reduction.toFixed(1)}%`"
+            value-size="headline"
+          />
+          <StatCard
+            :label="t('simulation.co2Saved')"
+            :value="`${(summary.current_co2_kg - summary.smart_co2_kg).toFixed(1)} kg`"
+            value-size="headline"
+          />
+          <StatCard
+            :label="t('simulation.costSaved')"
+            :value="`${(summary.current_cost_baht - summary.smart_cost_baht).toFixed(1)} baht`"
+            value-size="headline"
+          />
+          <StatCard
+            :label="t('simulation.v3Energy')"
+            :value="`${summary.coolsense_v3_energy_kwh.toFixed(1)} kWh`"
+            value-size="headline"
+          />
+          <StatCard
+            :label="t('simulation.v3EnergySaved')"
+            :value="`${(summary.static_v3_energy_kwh - summary.coolsense_v3_energy_kwh).toFixed(1)} kWh`"
+            value-size="headline"
+          />
+          <StatCard
+            :label="t('simulation.v3PctReduction')"
+            :value="`${summary.v3_pct_reduction.toFixed(1)}%`"
+            value-size="headline"
+          />
+        </div>
+      </details>
 
       <details class="bg-white rounded-xl border border-slate-200 shadow-[0_4px_20px_rgba(6,78,59,0.05)] p-4">
         <summary class="cursor-pointer text-label-md text-on-surface select-none">
