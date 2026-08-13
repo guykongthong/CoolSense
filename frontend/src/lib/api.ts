@@ -92,6 +92,13 @@ export interface SimulationSummary {
   current_cost_baht: number;
   smart_cost_baht: number;
   pct_reduction: number;
+  static_v3_energy_kwh: number;
+  coolsense_v3_energy_kwh: number;
+  static_v3_co2_kg: number;
+  coolsense_v3_co2_kg: number;
+  static_v3_cost_baht: number;
+  coolsense_v3_cost_baht: number;
+  v3_pct_reduction: number;
 }
 
 export interface SimulationRunResult {
@@ -114,6 +121,12 @@ export interface SimulationHourlyRow {
   smart_cumulative_kwh: number;
   current_cumulative_co2: number;
   smart_cumulative_co2: number;
+  static_v3_power_kw: number;
+  coolsense_v3_power_kw: number;
+  static_v3_cumulative_kwh: number;
+  coolsense_v3_cumulative_kwh: number;
+  static_v3_cumulative_co2: number;
+  coolsense_v3_cumulative_co2: number;
 }
 
 export interface SimulationListItem {

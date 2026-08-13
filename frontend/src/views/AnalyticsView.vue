@@ -19,10 +19,17 @@ const selectedRoom = ref<RoomId>(ROOM_IDS[0]);
 
 const CURRENT_COLOR = '#2a78d6';
 const SMART_COLOR = '#eb6834';
+const SMART_V3_COLOR = '#d68f2a';
 const CO2_PER_KWH = 0.5;
 const COST_PER_KWH_BAHT = 5;
 const CURRENT_SYSTEM_KW = 4.5;
 const MODE_KW = { eco: 0.5, moderate: 2.5, full: 4.5 };
+// Rough stand-ins for the V3 mock preview only — CoolSense V3's real
+// physics (supabase/functions/_shared/acCalculationV3.ts) scales with
+// actual room area + occupancy, which this client-side mock doesn't model.
+// Replaced immediately once "Generate & Run Comparison" succeeds.
+const STATIC_V3_KW = 2.75;
+const MODE_V3_KW = { eco: 1.0, moderate: 1.8, full: 3.5 };
 
 // No backend/session dependency for the initial view — generates a
 // plausible 168h current-vs-smart dataset client-side, using the same
@@ -35,6 +42,8 @@ function generateMockComparison(durationHours: number): { hourly: SimulationHour
   const hourly: SimulationHourlyRow[] = [];
   let currentCum = 0;
   let smartCum = 0;
+  let staticV3Cum = 0;
+  let smartV3Cum = 0;
 
   for (let i = 0; i < durationHours; i++) {
     const hour = i % 24;
@@ -42,19 +51,23 @@ function generateMockComparison(durationHours: number): { hourly: SimulationHour
     const isPeak = (hour >= 9 && hour < 17) || (hour >= 19 && hour < 23);
     const isNight = hour < 7 || hour >= 23;
 
-    let smartKw: number;
+    let mode: keyof typeof MODE_KW;
     if (isNight) {
-      smartKw = MODE_KW.eco;
+      mode = 'eco';
     } else if (isWeekend) {
-      smartKw = Math.random() < 0.5 ? MODE_KW.eco : MODE_KW.moderate;
+      mode = Math.random() < 0.5 ? 'eco' : 'moderate';
     } else if (isPeak) {
-      smartKw = Math.random() < 0.55 ? MODE_KW.full : MODE_KW.moderate;
+      mode = Math.random() < 0.55 ? 'full' : 'moderate';
     } else {
-      smartKw = Math.random() < 0.5 ? MODE_KW.moderate : MODE_KW.eco;
+      mode = Math.random() < 0.5 ? 'moderate' : 'eco';
     }
+    const smartKw = MODE_KW[mode];
+    const smartV3Kw = MODE_V3_KW[mode];
 
     currentCum += CURRENT_SYSTEM_KW;
     smartCum += smartKw;
+    staticV3Cum += STATIC_V3_KW;
+    smartV3Cum += smartV3Kw;
 
     hourly.push({
       id: `mock-${i}`,
@@ -66,10 +79,17 @@ function generateMockComparison(durationHours: number): { hourly: SimulationHour
       smart_cumulative_kwh: smartCum,
       current_cumulative_co2: currentCum * CO2_PER_KWH,
       smart_cumulative_co2: smartCum * CO2_PER_KWH,
+      static_v3_power_kw: STATIC_V3_KW,
+      coolsense_v3_power_kw: smartV3Kw,
+      static_v3_cumulative_kwh: staticV3Cum,
+      coolsense_v3_cumulative_kwh: smartV3Cum,
+      static_v3_cumulative_co2: staticV3Cum * CO2_PER_KWH,
+      coolsense_v3_cumulative_co2: smartV3Cum * CO2_PER_KWH,
     });
   }
 
   const energySaved = currentCum - smartCum;
+  const v3EnergySaved = staticV3Cum - smartV3Cum;
   const summary: SimulationSummary = {
     duration_hours: durationHours,
     current_energy_kwh: currentCum,
@@ -79,6 +99,13 @@ function generateMockComparison(durationHours: number): { hourly: SimulationHour
     current_cost_baht: currentCum * COST_PER_KWH_BAHT,
     smart_cost_baht: smartCum * COST_PER_KWH_BAHT,
     pct_reduction: currentCum > 0 ? (energySaved / currentCum) * 100 : 0,
+    static_v3_energy_kwh: staticV3Cum,
+    coolsense_v3_energy_kwh: smartV3Cum,
+    static_v3_co2_kg: staticV3Cum * CO2_PER_KWH,
+    coolsense_v3_co2_kg: smartV3Cum * CO2_PER_KWH,
+    static_v3_cost_baht: staticV3Cum * COST_PER_KWH_BAHT,
+    coolsense_v3_cost_baht: smartV3Cum * COST_PER_KWH_BAHT,
+    v3_pct_reduction: staticV3Cum > 0 ? (v3EnergySaved / staticV3Cum) * 100 : 0,
   };
 
   return { hourly, summary };
@@ -98,10 +125,12 @@ const chartSeries = computed(() => ({
   power: [
     { key: 'current_power_kw', color: CURRENT_COLOR, label: t('analytics.currentLegend') },
     { key: 'smart_power_kw', color: SMART_COLOR, label: t('analytics.smartLegend') },
+    { key: 'coolsense_v3_power_kw', color: SMART_V3_COLOR, label: t('analytics.smartV3Legend') },
   ],
   energy: [
     { key: 'current_cumulative_kwh', color: CURRENT_COLOR, label: t('analytics.currentLegend') },
     { key: 'smart_cumulative_kwh', color: SMART_COLOR, label: t('analytics.smartLegend') },
+    { key: 'coolsense_v3_cumulative_kwh', color: SMART_V3_COLOR, label: t('analytics.smartV3Legend') },
   ],
 }));
 
@@ -185,6 +214,21 @@ async function handleGenerateAndRun() {
           :value="`${(summary.current_cost_baht - summary.smart_cost_baht).toFixed(1)} baht`"
           value-size="headline"
         />
+        <StatCard
+          :label="t('analytics.v3Energy')"
+          :value="`${summary.coolsense_v3_energy_kwh.toFixed(1)} kWh`"
+          value-size="headline"
+        />
+        <StatCard
+          :label="t('analytics.v3EnergySaved')"
+          :value="`${(summary.static_v3_energy_kwh - summary.coolsense_v3_energy_kwh).toFixed(1)} kWh`"
+          value-size="headline"
+        />
+        <StatCard
+          :label="t('analytics.v3PctReduction')"
+          :value="`${summary.v3_pct_reduction.toFixed(1)}%`"
+          value-size="headline"
+        />
       </div>
 
       <Card :title="t('analytics.powerOverTime')">
@@ -221,10 +265,16 @@ async function handleGenerateAndRun() {
                   {{ t('analytics.smartKw') }}
                 </th>
                 <th class="py-2 pr-4">
+                  {{ t('analytics.smartV3Kw') }}
+                </th>
+                <th class="py-2 pr-4">
                   {{ t('analytics.currentCumKwh') }}
                 </th>
                 <th class="py-2 pr-4">
                   {{ t('analytics.smartCumKwh') }}
+                </th>
+                <th class="py-2 pr-4">
+                  {{ t('analytics.smartV3CumKwh') }}
                 </th>
               </tr>
             </thead>
@@ -244,10 +294,16 @@ async function handleGenerateAndRun() {
                   {{ row.smart_power_kw.toFixed(2) }}
                 </td>
                 <td class="py-1.5 pr-4">
+                  {{ row.coolsense_v3_power_kw.toFixed(2) }}
+                </td>
+                <td class="py-1.5 pr-4">
                   {{ row.current_cumulative_kwh.toFixed(1) }}
                 </td>
                 <td class="py-1.5 pr-4">
                   {{ row.smart_cumulative_kwh.toFixed(1) }}
+                </td>
+                <td class="py-1.5 pr-4">
+                  {{ row.coolsense_v3_cumulative_kwh.toFixed(1) }}
                 </td>
               </tr>
             </tbody>
