@@ -216,6 +216,10 @@ async function handleRun(req: Request, ctx: SupabaseContext): Promise<Response> 
       static_v3_cost_baht: summary.static_v3_cost_baht,
       coolsense_v3_cost_baht: summary.coolsense_v3_cost_baht,
       v3_pct_reduction: summary.v3_pct_reduction,
+      app_energy_kwh: summary.app_energy_kwh,
+      net_energy_saved_kwh: summary.net_energy_saved_kwh,
+      net_co2_saved_kg: summary.net_co2_saved_kg,
+      net_cost_saved_baht: summary.net_cost_saved_baht,
     })
     .select()
     .maybeSingle();
