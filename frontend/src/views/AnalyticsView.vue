@@ -1,351 +1,131 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import Card from '../components/ui/Card.vue';
-import StatCard from '../components/ui/StatCard.vue';
 import LineAreaChart from '../components/ui/LineAreaChart.vue';
 import { t } from '../lib/i18n';
-import { ROOM_IDS, type RoomId } from '../lib/rooms';
 import {
-  generateMockData,
-  getSimulationHourlyData,
-  runSimulation,
-  type RoomSize,
-  type SimulationHourlyRow,
-  type SimulationSummary,
-  type WeatherCondition,
+  type DateRange,
+  getElectricHistory,
+  getPeopleHistory,
+  getTemperatureHistory,
+  type HistoryPoint,
+  rangeStart,
 } from '../lib/api';
 
-const selectedRoom = ref<RoomId>(ROOM_IDS[0]);
+type Tab = 'people' | 'electric' | 'temperature';
 
-const CURRENT_COLOR = '#2a78d6';
-const SMART_COLOR = '#eb6834';
-const CO2_PER_KWH = 0.5;
-const COST_PER_KWH_BAHT = 5;
-const CURRENT_SYSTEM_KW = 4.5;
-const MODE_KW = { eco: 0.5, moderate: 2.5, full: 4.5 };
+const TAB_IDS: Tab[] = ['people', 'electric', 'temperature'];
+const RANGE_IDS: DateRange[] = ['today', '7d', '30d'];
 
-// No backend/session dependency for the initial view — generates a
-// plausible 168h current-vs-smart dataset client-side, using the same
-// day/night occupancy pattern and CO2/cost formulas as
-// supabase/functions/_shared/simulation.ts, so the shape (flat baseline,
-// mode-driven smart plateaus) matches what a real run produces. Replaced by
-// the real thing once "Generate & Run Comparison" succeeds against a live
-// backend.
-function generateMockComparison(durationHours: number): { hourly: SimulationHourlyRow[]; summary: SimulationSummary } {
-  const hourly: SimulationHourlyRow[] = [];
-  let currentCum = 0;
-  let smartCum = 0;
+const TAB_CONFIG: Record<Tab, { fetcher: (range: DateRange) => Promise<HistoryPoint[]>; color: string; unit: string }> = {
+  people: { fetcher: getPeopleHistory, color: '#eb6834', unit: '' },
+  electric: { fetcher: getElectricHistory, color: '#2a78d6', unit: ' kW' },
+  temperature: { fetcher: getTemperatureHistory, color: '#1baf7a', unit: '°C' },
+};
 
-  for (let i = 0; i < durationHours; i++) {
-    const hour = i % 24;
-    const isWeekend = Math.floor(i / 24) % 7 >= 5;
-    const isPeak = (hour >= 9 && hour < 17) || (hour >= 19 && hour < 23);
-    const isNight = hour < 7 || hour >= 23;
-
-    let smartKw: number;
-    if (isNight) {
-      smartKw = MODE_KW.eco;
-    } else if (isWeekend) {
-      smartKw = Math.random() < 0.5 ? MODE_KW.eco : MODE_KW.moderate;
-    } else if (isPeak) {
-      smartKw = Math.random() < 0.55 ? MODE_KW.full : MODE_KW.moderate;
-    } else {
-      smartKw = Math.random() < 0.5 ? MODE_KW.moderate : MODE_KW.eco;
-    }
-
-    currentCum += CURRENT_SYSTEM_KW;
-    smartCum += smartKw;
-
-    hourly.push({
-      id: `mock-${i}`,
-      simulation_run_id: 'mock',
-      hour_index: i,
-      current_power_kw: CURRENT_SYSTEM_KW,
-      smart_power_kw: smartKw,
-      current_cumulative_kwh: currentCum,
-      smart_cumulative_kwh: smartCum,
-      current_cumulative_co2: currentCum * CO2_PER_KWH,
-      smart_cumulative_co2: smartCum * CO2_PER_KWH,
-    });
-  }
-
-  const energySaved = currentCum - smartCum;
-  const summary: SimulationSummary = {
-    duration_hours: durationHours,
-    current_energy_kwh: currentCum,
-    smart_energy_kwh: smartCum,
-    current_co2_kg: currentCum * CO2_PER_KWH,
-    smart_co2_kg: smartCum * CO2_PER_KWH,
-    current_cost_baht: currentCum * COST_PER_KWH_BAHT,
-    smart_cost_baht: smartCum * COST_PER_KWH_BAHT,
-    pct_reduction: currentCum > 0 ? (energySaved / currentCum) * 100 : 0,
-  };
-
-  return { hourly, summary };
-}
-
-const durationHours = ref(168);
-const roomSize = ref<RoomSize>('medium');
-const weatherCondition = ref<WeatherCondition>('diurnal');
-const acSeer = ref(4.5);
-
-const running = ref(false);
+const activeTab = ref<Tab>('people');
+const dateRange = ref<DateRange>('today');
+const points = ref<HistoryPoint[]>([]);
+const loading = ref(false);
 const errorMessage = ref('');
-const summary = ref<SimulationSummary | null>(null);
-const hourlyData = ref<SimulationHourlyRow[]>([]);
 
-const chartSeries = computed(() => ({
-  power: [
-    { key: 'current_power_kw', color: CURRENT_COLOR, label: t('analytics.currentLegend') },
-    { key: 'smart_power_kw', color: SMART_COLOR, label: t('analytics.smartLegend') },
-  ],
-  energy: [
-    { key: 'current_cumulative_kwh', color: CURRENT_COLOR, label: t('analytics.currentLegend') },
-    { key: 'smart_cumulative_kwh', color: SMART_COLOR, label: t('analytics.smartLegend') },
-  ],
-}));
-
-onMounted(() => {
-  const mock = generateMockComparison(durationHours.value);
-  hourlyData.value = mock.hourly;
-  summary.value = mock.summary;
-});
-
-async function handleGenerateAndRun() {
-  running.value = true;
+async function load() {
+  loading.value = true;
   errorMessage.value = '';
   try {
-    await generateMockData(durationHours.value, roomSize.value);
-    const result = await runSimulation(durationHours.value, roomSize.value, acSeer.value, weatherCondition.value);
-    summary.value = result.summary;
-    hourlyData.value = await getSimulationHourlyData(result.simulation_run_id);
+    points.value = await TAB_CONFIG[activeTab.value].fetcher(dateRange.value);
   } catch {
     errorMessage.value = t('analytics.errorFallback');
+    points.value = [];
   } finally {
-    running.value = false;
+    loading.value = false;
   }
 }
+
+watch([activeTab, dateRange], load, { immediate: true });
+
+const chartSeries = computed(() => [
+  { key: 'value', color: TAB_CONFIG[activeTab.value].color, label: t('analytics.legendRecorded') },
+]);
+
+function formatLabel(row: Record<string, unknown>): string {
+  const bucket = Number(row.bucket);
+  if (dateRange.value === 'today') return `${bucket}:00`;
+  const date = new Date(rangeStart(dateRange.value).getTime() + bucket * 24 * 60 * 60 * 1000);
+  return `${date.getMonth() + 1}/${date.getDate()}`;
+}
+
+const hasData = computed(() => points.value.some((p) => p.value > 0));
+
+const titleKey = computed(() => `analytics.${activeTab.value}Title`);
+const subtitleKey = computed(() => `analytics.${activeTab.value}Subtitle`);
 </script>
 
 <template>
-  <div class="flex flex-col md:flex-row gap-6 items-start">
-    <aside class="md:w-56 shrink-0 w-full">
-      <Card :title="t('analytics.rooms')">
-        <div class="flex flex-col gap-1.5">
-          <button
-            v-for="id in ROOM_IDS"
-            :key="id"
-            type="button"
-            class="w-full text-left px-4 py-2.5 rounded-lg text-label-md transition-colors"
-            :class="
-              selectedRoom === id
-                ? 'bg-primary text-on-primary'
-                : 'bg-surface-container-low text-on-surface-variant hover:bg-surface-container-high'
-            "
-            @click="selectedRoom = id"
-          >
-            {{ t(`rooms.${id}`) }}
-          </button>
-        </div>
-      </Card>
-    </aside>
-
-    <div class="flex-1 min-w-0 flex flex-col gap-6">
-      <div
-        v-if="summary"
-        class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4"
-      >
-        <StatCard
-          :label="t('analytics.currentEnergy')"
-          :value="`${summary.current_energy_kwh.toFixed(0)} kWh`"
-          value-size="headline"
-        />
-        <StatCard
-          :label="t('analytics.smartEnergy')"
-          :value="`${summary.smart_energy_kwh.toFixed(1)} kWh`"
-          value-size="headline"
-        />
-        <StatCard
-          :label="t('analytics.energySaved')"
-          :value="`${(summary.current_energy_kwh - summary.smart_energy_kwh).toFixed(1)} kWh`"
-          value-size="headline"
-        />
-        <StatCard
-          :label="t('analytics.pctReduction')"
-          :value="`${summary.pct_reduction.toFixed(1)}%`"
-          value-size="headline"
-        />
-        <StatCard
-          :label="t('analytics.co2Saved')"
-          :value="`${(summary.current_co2_kg - summary.smart_co2_kg).toFixed(1)} kg`"
-          value-size="headline"
-        />
-        <StatCard
-          :label="t('analytics.costSaved')"
-          :value="`${(summary.current_cost_baht - summary.smart_cost_baht).toFixed(1)} baht`"
-          value-size="headline"
-        />
+  <div class="flex flex-col gap-6">
+    <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
+      <div class="flex gap-2 bg-surface-container-low rounded-lg p-1 w-fit">
+        <button
+          v-for="tab in TAB_IDS"
+          :key="tab"
+          type="button"
+          class="px-4 py-2 text-label-md rounded-md transition-colors"
+          :class="activeTab === tab ? 'bg-primary text-on-primary' : 'text-on-surface-variant hover:bg-surface-container-high'"
+          @click="activeTab = tab"
+        >
+          {{ t(`analytics.tab.${tab}`) }}
+        </button>
       </div>
 
-      <Card :title="t('analytics.powerOverTime')">
-        <LineAreaChart
-          :data="hourlyData"
-          mode="line"
-          :series="chartSeries.power"
-        />
-      </Card>
-
-      <Card :title="t('analytics.cumulativeEnergy')">
-        <LineAreaChart
-          :data="hourlyData"
-          mode="area"
-          :series="chartSeries.energy"
-        />
-      </Card>
-
-      <details class="bg-white rounded-xl border border-slate-200 shadow-[0_4px_20px_rgba(6,78,59,0.05)] p-4">
-        <summary class="cursor-pointer text-label-md text-on-surface select-none">
-          {{ t('analytics.tableView') }}
-        </summary>
-        <div class="mt-4 overflow-x-auto max-h-96 overflow-y-auto">
-          <table class="w-full text-label-sm">
-            <thead>
-              <tr class="text-left text-on-surface-variant border-b border-slate-200">
-                <th class="py-2 pr-4">
-                  {{ t('analytics.hour') }}
-                </th>
-                <th class="py-2 pr-4">
-                  {{ t('analytics.currentKw') }}
-                </th>
-                <th class="py-2 pr-4">
-                  {{ t('analytics.smartKw') }}
-                </th>
-                <th class="py-2 pr-4">
-                  {{ t('analytics.currentCumKwh') }}
-                </th>
-                <th class="py-2 pr-4">
-                  {{ t('analytics.smartCumKwh') }}
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="row in hourlyData"
-                :key="row.hour_index"
-                class="border-b border-slate-100"
-              >
-                <td class="py-1.5 pr-4">
-                  {{ row.hour_index }}h
-                </td>
-                <td class="py-1.5 pr-4">
-                  {{ row.current_power_kw.toFixed(2) }}
-                </td>
-                <td class="py-1.5 pr-4">
-                  {{ row.smart_power_kw.toFixed(2) }}
-                </td>
-                <td class="py-1.5 pr-4">
-                  {{ row.current_cumulative_kwh.toFixed(1) }}
-                </td>
-                <td class="py-1.5 pr-4">
-                  {{ row.smart_cumulative_kwh.toFixed(1) }}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </details>
-
-      <Card :title="t('analytics.comparisonSettings')">
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
-          <div class="flex flex-col gap-1.5">
-            <label
-              class="text-label-md text-on-surface-variant"
-              for="an_duration"
-            >{{ t('analytics.duration') }}</label>
-            <input
-              id="an_duration"
-              v-model.number="durationHours"
-              class="w-full border border-slate-300 rounded-lg px-3 py-2 text-body-md"
-              type="number"
-              min="1"
-            >
-          </div>
-          <div class="flex flex-col gap-1.5">
-            <label
-              class="text-label-md text-on-surface-variant"
-              for="an_room_size"
-            >{{ t('analytics.roomSize') }}</label>
-            <select
-              id="an_room_size"
-              v-model="roomSize"
-              class="w-full border border-slate-300 rounded-lg px-3 py-2 text-body-md bg-white"
-            >
-              <option value="small">
-                {{ t('common.small') }}
-              </option>
-              <option value="medium">
-                {{ t('common.medium') }}
-              </option>
-              <option value="large">
-                {{ t('common.large') }}
-              </option>
-            </select>
-          </div>
-          <div class="flex flex-col gap-1.5">
-            <label
-              class="text-label-md text-on-surface-variant"
-              for="an_weather"
-            >{{ t('analytics.weather') }}</label>
-            <select
-              id="an_weather"
-              v-model="weatherCondition"
-              class="w-full border border-slate-300 rounded-lg px-3 py-2 text-body-md bg-white"
-            >
-              <option value="diurnal">
-                {{ t('analytics.diurnal') }}
-              </option>
-              <option value="cool">
-                {{ t('analytics.cool') }}
-              </option>
-              <option value="warm">
-                {{ t('analytics.warm') }}
-              </option>
-              <option value="hot">
-                {{ t('analytics.hot') }}
-              </option>
-            </select>
-          </div>
-          <div class="flex flex-col gap-1.5">
-            <label
-              class="text-label-md text-on-surface-variant"
-              for="an_seer"
-            >{{ t('analytics.acSeer') }}</label>
-            <input
-              id="an_seer"
-              v-model.number="acSeer"
-              class="w-full border border-slate-300 rounded-lg px-3 py-2 text-body-md"
-              type="number"
-              min="2"
-              max="6"
-              step="0.1"
-            >
-          </div>
-        </div>
-        <div class="flex items-center gap-3">
-          <button
-            type="button"
-            :disabled="running"
-            class="border border-slate-300 text-on-surface text-label-md rounded-lg px-4 py-2.5 hover:bg-surface-container-low transition-colors disabled:opacity-50"
-            @click="handleGenerateAndRun"
-          >
-            {{ running ? t('analytics.running') : t('analytics.runButton') }}
-          </button>
-          <span
-            v-if="errorMessage"
-            class="text-label-sm text-error"
-          >{{ errorMessage }}</span>
-        </div>
-      </Card>
+      <div class="flex gap-2 bg-surface-container-low rounded-lg p-1 w-fit">
+        <button
+          v-for="range in RANGE_IDS"
+          :key="range"
+          type="button"
+          class="px-4 py-2 text-label-md rounded-md transition-colors"
+          :class="dateRange === range ? 'bg-primary text-on-primary' : 'text-on-surface-variant hover:bg-surface-container-high'"
+          @click="dateRange = range"
+        >
+          {{ t(`analytics.range.${range}`) }}
+        </button>
+      </div>
     </div>
+
+    <Card :title="t(titleKey)">
+      <template #actions>
+        <span class="flex items-center gap-1.5 text-label-sm text-on-surface-variant">
+          <span
+            class="inline-block w-2.5 h-2.5 rounded-sm"
+            :style="{ backgroundColor: TAB_CONFIG[activeTab].color }"
+          />
+          {{ t('analytics.legendRecorded') }}
+        </span>
+      </template>
+
+      <p class="text-body-md text-on-surface-variant -mt-4 mb-4">
+        {{ t(subtitleKey) }}
+      </p>
+
+      <p
+        v-if="errorMessage"
+        class="text-label-sm text-error mb-4"
+      >
+        {{ errorMessage }}
+      </p>
+      <p
+        v-else-if="!loading && !hasData"
+        class="text-label-sm text-on-surface-variant mb-4"
+      >
+        {{ t('analytics.noData') }}
+      </p>
+
+      <LineAreaChart
+        :data="points"
+        mode="line"
+        x-key="bucket"
+        :series="chartSeries"
+        :format-x="formatLabel"
+      />
+    </Card>
   </div>
 </template>

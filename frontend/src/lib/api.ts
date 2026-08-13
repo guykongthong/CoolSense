@@ -92,6 +92,13 @@ export interface SimulationSummary {
   current_cost_baht: number;
   smart_cost_baht: number;
   pct_reduction: number;
+  static_v3_energy_kwh: number;
+  coolsense_v3_energy_kwh: number;
+  static_v3_co2_kg: number;
+  coolsense_v3_co2_kg: number;
+  static_v3_cost_baht: number;
+  coolsense_v3_cost_baht: number;
+  v3_pct_reduction: number;
 }
 
 export interface SimulationRunResult {
@@ -114,6 +121,12 @@ export interface SimulationHourlyRow {
   smart_cumulative_kwh: number;
   current_cumulative_co2: number;
   smart_cumulative_co2: number;
+  static_v3_power_kw: number;
+  coolsense_v3_power_kw: number;
+  static_v3_cumulative_kwh: number;
+  coolsense_v3_cumulative_kwh: number;
+  static_v3_cumulative_co2: number;
+  coolsense_v3_cumulative_co2: number;
 }
 
 export interface SimulationListItem {
@@ -125,10 +138,13 @@ export interface SimulationListItem {
   created_at: string;
 }
 
-async function invoke<T>(path: string, options: { method?: string; body?: unknown } = {}): Promise<T> {
+async function invoke<T>(
+  path: string,
+  options: { method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'; body?: object } = {},
+): Promise<T> {
   const { data, error } = await supabase.functions.invoke<T>(path, {
     method: options.method ?? 'POST',
-    body: options.body,
+    body: options.body as Record<string, unknown> | undefined,
   });
   if (error) throw error;
   return data as T;
@@ -193,4 +209,110 @@ export function getSimulationHourlyData(id: string): Promise<SimulationHourlyRow
 
 export function listSimulations(): Promise<SimulationListItem[]> {
   return invoke('simulation/list', { method: 'GET' });
+}
+
+// ---- Analytics history (direct table reads — occupancy_readings,
+// ac_calculations currently have RLS disabled, same pre-existing gap noted
+// elsewhere; no dedicated history endpoint exists yet, see CLAUDE.md) ----
+
+export type DateRange = 'today' | '7d' | '30d';
+
+export interface HistoryPoint {
+  bucket: number;
+  value: number;
+}
+
+export function rangeStart(range: DateRange): Date {
+  const now = new Date();
+  if (range === 'today') {
+    const start = new Date(now);
+    start.setHours(0, 0, 0, 0);
+    return start;
+  }
+  const days = range === '7d' ? 7 : 30;
+  const start = new Date(now.getTime() - (days - 1) * 24 * 60 * 60 * 1000);
+  start.setHours(0, 0, 0, 0);
+  return start;
+}
+
+function bucketCountFor(range: DateRange): number {
+  return range === 'today' ? 24 : range === '7d' ? 7 : 30;
+}
+
+function bucketIndexFor(timestamp: string, range: DateRange, start: Date): number {
+  const ts = new Date(timestamp);
+  if (range === 'today') return ts.getHours();
+  return Math.floor((ts.getTime() - start.getTime()) / (24 * 60 * 60 * 1000));
+}
+
+// Averages raw (timestamp, value) rows into evenly-spaced buckets — one per
+// hour-of-day for "today", one per calendar day for "7d"/"30d" — so the
+// chart's x-axis stays evenly spaced regardless of how sparse or dense the
+// underlying readings are (there's no automatic polling yet, only
+// on-demand writes — see CLAUDE.md). Buckets with no readings default to 0
+// rather than a fabricated/interpolated value.
+function bucketize(rows: { timestamp: string; value: number }[], range: DateRange): HistoryPoint[] {
+  const start = rangeStart(range);
+  const count = bucketCountFor(range);
+  const sums = new Map<number, { sum: number; n: number }>();
+
+  for (const row of rows) {
+    const idx = bucketIndexFor(row.timestamp, range, start);
+    if (idx < 0 || idx >= count) continue;
+    const existing = sums.get(idx);
+    if (existing) {
+      existing.sum += row.value;
+      existing.n += 1;
+    } else {
+      sums.set(idx, { sum: row.value, n: 1 });
+    }
+  }
+
+  return Array.from({ length: count }, (_, i) => {
+    const bucket = sums.get(i);
+    return { bucket: i, value: bucket ? bucket.sum / bucket.n : 0 };
+  });
+}
+
+export async function getPeopleHistory(range: DateRange): Promise<HistoryPoint[]> {
+  const { data, error } = await supabase
+    .from('occupancy_readings')
+    .select('people_count, captured_at')
+    .neq('source', 'mock')
+    .gte('captured_at', rangeStart(range).toISOString())
+    .order('captured_at', { ascending: true });
+  if (error) throw error;
+  const rows = (data ?? []).map((r: { people_count: number; captured_at: string }) => ({
+    timestamp: r.captured_at,
+    value: r.people_count,
+  }));
+  return bucketize(rows, range);
+}
+
+export async function getElectricHistory(range: DateRange): Promise<HistoryPoint[]> {
+  const { data, error } = await supabase
+    .from('ac_calculations')
+    .select('power_kw, calculated_at')
+    .gte('calculated_at', rangeStart(range).toISOString())
+    .order('calculated_at', { ascending: true });
+  if (error) throw error;
+  const rows = (data ?? []).map((r: { power_kw: number; calculated_at: string }) => ({
+    timestamp: r.calculated_at,
+    value: r.power_kw,
+  }));
+  return bucketize(rows, range);
+}
+
+export async function getTemperatureHistory(range: DateRange): Promise<HistoryPoint[]> {
+  const { data, error } = await supabase
+    .from('ac_calculations')
+    .select('temperature_c, calculated_at')
+    .gte('calculated_at', rangeStart(range).toISOString())
+    .order('calculated_at', { ascending: true });
+  if (error) throw error;
+  const rows = (data ?? []).map((r: { temperature_c: number; calculated_at: string }) => ({
+    timestamp: r.calculated_at,
+    value: r.temperature_c,
+  }));
+  return bucketize(rows, range);
 }

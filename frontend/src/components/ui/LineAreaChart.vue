@@ -7,15 +7,33 @@ export interface ChartSeries {
   label: string;
 }
 
+// Rows may carry non-numeric fields too (e.g. SimulationHourlyRow's `id`),
+// so this stays loosely typed — numAt() below is the single place that
+// coerces a series/x value to a number for arithmetic.
+type ChartRow = Record<string, unknown>;
+
 const props = withDefaults(
   defineProps<{
-    data: Record<string, number>[];
+    data: ChartRow[];
     series: ChartSeries[];
     mode?: 'line' | 'area';
     xKey?: string;
+    // Formats the x-axis tick + tooltip label from a data row. Defaults to
+    // the original "{hour_index}h" behavior so existing callers (Simulation,
+    // People) are unaffected.
+    formatX?: (row: ChartRow) => string;
   }>(),
-  { mode: 'line', xKey: 'hour_index' },
+  { mode: 'line', xKey: 'hour_index', formatX: undefined },
 );
+
+function numAt(row: ChartRow | null | undefined, key: string): number {
+  return Number(row?.[key] ?? 0);
+}
+
+function xLabel(row: ChartRow | undefined, index: number): string {
+  if (!row) return `${index}h`;
+  return props.formatX ? props.formatX(row) : `${row[props.xKey] ?? index}h`;
+}
 
 const width = 680;
 const height = 240;
@@ -29,7 +47,7 @@ const plotH = height - padT - padB;
 const n = computed(() => props.data.length);
 
 const maxY = computed(() => {
-  const values = props.series.flatMap((s) => props.data.map((d) => d[s.key] ?? 0));
+  const values = props.series.flatMap((s) => props.data.map((d) => numAt(d, s.key)));
   return Math.max(...values, 0) * 1.1 || 1;
 });
 
@@ -56,14 +74,14 @@ const xTicks = computed(() => {
   const step = Math.max(24, Math.ceil(n.value / 8 / 24) * 24);
   const ticks: { x: number; label: string }[] = [];
   for (let i = 0; i < n.value; i += step) {
-    ticks.push({ x: xAt(i), label: `${props.data[i]?.[props.xKey] ?? i}h` });
+    ticks.push({ x: xAt(i), label: xLabel(props.data[i], i) });
   }
   return ticks;
 });
 
 const seriesPaths = computed(() =>
   props.series.map((s) => {
-    const pts = props.data.map((d, i) => `${xAt(i)},${yAt(d[s.key] ?? 0)}`).join(' ');
+    const pts = props.data.map((d, i) => `${xAt(i)},${yAt(numAt(d, s.key))}`).join(' ');
     const areaPts = `${xAt(0)},${yAt(0)} ${pts} ${xAt(n.value - 1)},${yAt(0)}`;
     return { ...s, points: pts, areaPoints: areaPts };
   }),
@@ -88,7 +106,7 @@ const hoverRow = computed(() => (hoverIdx.value !== null ? props.data[hoverIdx.v
 const hoverX = computed(() => (hoverIdx.value !== null ? xAt(hoverIdx.value) : 0));
 const tooltipTopPct = computed(() => {
   if (!hoverRow.value) return 0;
-  const topValue = Math.max(...props.series.map((s) => hoverRow.value![s.key] ?? 0));
+  const topValue = Math.max(...props.series.map((s) => numAt(hoverRow.value, s.key)));
   return (yAt(topValue) / height) * 100;
 });
 </script>
@@ -180,14 +198,14 @@ const tooltipTopPct = computed(() => {
       :style="{ left: `${(hoverX / width) * 100}%`, top: `${tooltipTopPct}%` }"
     >
       <div class="text-on-surface-variant">
-        Hour {{ hoverRow[xKey] }}
+        {{ formatX ? formatX(hoverRow) : `Hour ${hoverRow[xKey]}` }}
       </div>
       <div
         v-for="s in series"
         :key="s.key"
         :style="{ color: s.color }"
       >
-        {{ s.label }}: {{ fmtNum(hoverRow[s.key] ?? 0, 2) }}
+        {{ s.label }}: {{ fmtNum(numAt(hoverRow, s.key), 2) }}
       </div>
     </div>
 

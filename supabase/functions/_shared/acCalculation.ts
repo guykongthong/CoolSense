@@ -98,7 +98,7 @@ export function getAcMode(peopleCount: number, roomSize: RoomSize): AcMode {
   return "eco";
 }
 
-function getWeatherMultiplier(outsideTempC: number, humidityPct: number): number {
+export function getWeatherMultiplier(outsideTempC: number, humidityPct: number): number {
   const raw = 1 +
     TEMP_LOAD_FACTOR_PER_C * (outsideTempC - WEATHER_BASELINE_TEMP_C) +
     HUMIDITY_LOAD_FACTOR_PER_PCT * (humidityPct - WEATHER_BASELINE_HUMIDITY_PCT);

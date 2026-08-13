@@ -127,6 +127,7 @@
     padding-top: 16px;
     --series-current: #2a78d6;
     --series-v2: #1baf7a;
+    --series-v3: #d68f2a;
   }
   .sim-section h3 { font-size: 0.9rem; margin: 20px 0 8px; }
   #runSimBtn {
@@ -353,6 +354,7 @@
       <div class="chart-legend">
         <span><span class="swatch" style="background:var(--series-current)"></span>Static</span>
         <span><span class="swatch" style="background:var(--series-v2)"></span>CoolSense V2</span>
+        <span><span class="swatch" style="background:var(--series-v3)"></span>CoolSense V3</span>
       </div>
       <div class="chart-wrap" id="simPowerChartWrap">
         <div id="simPowerChart"></div>
@@ -363,6 +365,7 @@
       <div class="chart-legend">
         <span><span class="swatch" style="background:var(--series-current)"></span>Static</span>
         <span><span class="swatch" style="background:var(--series-v2)"></span>CoolSense V2</span>
+        <span><span class="swatch" style="background:var(--series-v3)"></span>CoolSense V3</span>
       </div>
       <div class="chart-wrap" id="simEnergyChartWrap">
         <div id="simEnergyChart"></div>
@@ -761,12 +764,16 @@
     const tiles = [
       { label: 'Static energy', value: fmtNum(summary.current_energy_kwh) + ' kWh' },
       { label: 'CoolSense V2 energy', value: fmtNum(summary.smart_energy_kwh) + ' kWh' },
-      { label: '% reduction', value: fmtNum(summary.pct_reduction) + '%' },
-      { label: 'Energy saved', value: fmtNum(summary.current_energy_kwh - summary.smart_energy_kwh) + ' kWh' },
+      { label: '% reduction (V2)', value: fmtNum(summary.pct_reduction) + '%' },
+      { label: 'Energy saved (V2)', value: fmtNum(summary.current_energy_kwh - summary.smart_energy_kwh) + ' kWh' },
       { label: 'Static CO₂', value: fmtNum(summary.current_co2_kg) + ' kg' },
       { label: 'CoolSense V2 CO₂', value: fmtNum(summary.smart_co2_kg) + ' kg' },
       { label: 'Static cost', value: fmtNum(summary.current_cost_baht) + ' baht' },
       { label: 'CoolSense V2 cost', value: fmtNum(summary.smart_cost_baht) + ' baht' },
+      { label: 'Static-v3 energy', value: fmtNum(summary.static_v3_energy_kwh) + ' kWh' },
+      { label: 'CoolSense V3 energy', value: fmtNum(summary.coolsense_v3_energy_kwh) + ' kWh' },
+      { label: '% reduction (V3)', value: fmtNum(summary.v3_pct_reduction) + '%' },
+      { label: 'Energy saved (V3)', value: fmtNum(summary.static_v3_energy_kwh - summary.coolsense_v3_energy_kwh) + ' kWh' },
     ];
     document.getElementById('simStats').innerHTML = tiles.map(t =>
       `<div class="sim-stat"><div class="sim-stat-label">${t.label}</div><div class="sim-stat-value">${t.value}</div></div>`
@@ -778,13 +785,17 @@
       <td>${h.hour_index}</td>
       <td>${fmtNum(h.current_power_kw, 2)}</td>
       <td>${fmtNum(h.smart_power_kw, 2)}</td>
+      <td>${fmtNum(h.static_v3_power_kw, 2)}</td>
+      <td>${fmtNum(h.coolsense_v3_power_kw, 2)}</td>
       <td>${fmtNum(h.current_cumulative_kwh, 1)}</td>
       <td>${fmtNum(h.smart_cumulative_kwh, 1)}</td>
+      <td>${fmtNum(h.static_v3_cumulative_kwh, 1)}</td>
+      <td>${fmtNum(h.coolsense_v3_cumulative_kwh, 1)}</td>
     </tr>`).join('');
     document.getElementById('simTable').innerHTML = `
       <thead><tr>
-        <th>Hour</th><th>Static kW</th><th>CoolSense V2 kW</th>
-        <th>Static cum. kWh</th><th>CoolSense V2 cum. kWh</th>
+        <th>Hour</th><th>Static kW</th><th>CoolSense V2 kW</th><th>Static-v3 kW</th><th>CoolSense V3 kW</th>
+        <th>Static cum. kWh</th><th>CoolSense V2 cum. kWh</th><th>Static-v3 cum. kWh</th><th>CoolSense V3 cum. kWh</th>
       </tr></thead>
       <tbody>${rows}</tbody>`;
   }
@@ -897,10 +908,18 @@
       document.getElementById('simResults').style.display = 'block';
       renderStats(run.summary);
       renderChart('simPowerChart', 'simPowerTooltip', hourly,
-        [{ key: 'current_power_kw', color: '#2a78d6' }, { key: 'smart_power_kw', color: '#1baf7a' }],
+        [
+          { key: 'current_power_kw', color: '#2a78d6' },
+          { key: 'smart_power_kw', color: '#1baf7a' },
+          { key: 'coolsense_v3_power_kw', color: '#d68f2a' },
+        ],
         'line');
       renderChart('simEnergyChart', 'simEnergyTooltip', hourly,
-        [{ key: 'current_cumulative_kwh', color: '#2a78d6' }, { key: 'smart_cumulative_kwh', color: '#1baf7a' }],
+        [
+          { key: 'current_cumulative_kwh', color: '#2a78d6' },
+          { key: 'smart_cumulative_kwh', color: '#1baf7a' },
+          { key: 'coolsense_v3_cumulative_kwh', color: '#d68f2a' },
+        ],
         'area');
       renderTable(hourly);
     } catch (err) {
