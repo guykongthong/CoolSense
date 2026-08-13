@@ -141,7 +141,7 @@ const activityRange = ref<'12h' | '24h'>('24h');
 
     <div class="relative w-full aspect-video bg-surface-container-low rounded-lg overflow-hidden flex items-center justify-center">
       <video
-        ref="videoRef"
+        :ref="(el) => (videoRef = el as HTMLVideoElement | null)"
         autoplay
         muted
         playsinline
