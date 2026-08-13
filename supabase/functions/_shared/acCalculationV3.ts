@@ -20,7 +20,7 @@ export interface AcSettingsV3 {
 // aren't what the professor's feedback was about; only the *capacity*
 // (BTU/hr) and efficiency (SEER) numbers were unrealistic.
 const MODE_TEMP_FAN: Record<AcMode, { temperature_c: number; fan_speed: number }> = {
-  eco: { temperature_c: 28, fan_speed: 1 },
+  eco: { temperature_c: 26, fan_speed: 1 },
   moderate: { temperature_c: 24, fan_speed: 2 },
   full: { temperature_c: 21, fan_speed: 3 },
 };

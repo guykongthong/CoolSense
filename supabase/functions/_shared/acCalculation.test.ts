@@ -29,7 +29,7 @@ Deno.test("large room thresholds (450 m²)", () => {
 Deno.test("calculateAcSettings returns base settings for eco/moderate", () => {
   assertEquals(calculateAcSettings(0, "medium"), {
     mode: "eco",
-    temperature_c: 28,
+    temperature_c: 26,
     fan_speed: 1,
     power_kw: 0.5,
     btu_per_hr: 2250,

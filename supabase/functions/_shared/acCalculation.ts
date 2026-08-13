@@ -26,7 +26,7 @@ export const ROOM_SIZE_SQM: Record<RoomSize, number> = { small: 100, medium: 275
 // Base temp/fan per mode. Weather adjustments will be layered in once the
 // science team defines the criteria for that.
 const MODE_TEMP_FAN: Record<AcMode, { temperature_c: number; fan_speed: number }> = {
-  eco: { temperature_c: 28, fan_speed: 1 },
+  eco: { temperature_c: 26, fan_speed: 1 },
   moderate: { temperature_c: 24, fan_speed: 2 },
   full: { temperature_c: 21, fan_speed: 3 },
 };

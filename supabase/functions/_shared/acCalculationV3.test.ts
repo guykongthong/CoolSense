@@ -11,9 +11,9 @@ Deno.test("constants match the design spec", () => {
 });
 
 Deno.test("calculateAcSettingsV3 at 0 people, baseline weather: pure envelope load, scales linearly with room m²", () => {
-  assertEquals(calculateAcSettingsV3(0, "small"), { mode: "eco", temperature_c: 28, fan_speed: 1, power_kw: 1.0, btu_per_hr: 15000 });
-  assertEquals(calculateAcSettingsV3(0, "medium"), { mode: "eco", temperature_c: 28, fan_speed: 1, power_kw: 2.75, btu_per_hr: 41250 });
-  assertEquals(calculateAcSettingsV3(0, "large"), { mode: "eco", temperature_c: 28, fan_speed: 1, power_kw: 4.5, btu_per_hr: 67500 });
+  assertEquals(calculateAcSettingsV3(0, "small"), { mode: "eco", temperature_c: 26, fan_speed: 1, power_kw: 1.0, btu_per_hr: 15000 });
+  assertEquals(calculateAcSettingsV3(0, "medium"), { mode: "eco", temperature_c: 26, fan_speed: 1, power_kw: 2.75, btu_per_hr: 41250 });
+  assertEquals(calculateAcSettingsV3(0, "large"), { mode: "eco", temperature_c: 26, fan_speed: 1, power_kw: 4.5, btu_per_hr: 67500 });
 });
 
 Deno.test("calculateAcSettingsV3 adds per-person load on top of envelope load, at every mode (not just beyond a threshold)", () => {

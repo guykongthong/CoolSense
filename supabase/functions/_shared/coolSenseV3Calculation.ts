@@ -16,7 +16,7 @@ export interface CoolSenseV3Settings {
 // physics (acCalculationV3.ts), not this easing behavior, so the V2-vs-V3
 // comparison isolates exactly that difference.
 const MODE_TEMP_RANGE: Record<AcMode, { min: number; max: number }> = {
-  eco: { min: 26, max: 28 },
+  eco: { min: 24, max: 26 },
   moderate: { min: 22, max: 26 },
   full: { min: 19, max: 23 },
 };

@@ -33,8 +33,8 @@ Deno.test("cool + dry (below baseline): setpoint eases warmer and power drops be
 Deno.test("eco mode never eases from weather alone — its base temp already sits at its range ceiling", () => {
   const v2 = calculateCoolSenseV2Settings(1, "large", 4.5, 15, 10);
   assertEquals(v2.mode, "eco");
-  assertEquals(v2.base_temp_c, 28);
-  assertEquals(v2.adjusted_temp_c, 28);
+  assertEquals(v2.base_temp_c, 26);
+  assertEquals(v2.adjusted_temp_c, 26);
 });
 
 Deno.test("moderate/full ease is clamped to the mode's range ceiling under extreme mild conditions", () => {
@@ -47,7 +47,7 @@ Deno.test("moderate/full ease is clamped to the mode's range ceiling under extre
 
 Deno.test("adjusted_temp_c always stays within [range.min, range.max] for its mode, across many conditions and comfort preferences", () => {
   const ranges: Record<string, { min: number; max: number }> = {
-    eco: { min: 26, max: 28 },
+    eco: { min: 24, max: 26 },
     moderate: { min: 22, max: 26 },
     full: { min: 19, max: 23 },
   };
@@ -144,12 +144,12 @@ Deno.test("comfort_preference 'cold' at baseline weather: -2°C, and power_kw ri
 });
 
 Deno.test("comfort_preference 'cold' is clamped to the mode's range floor, never goes below it", () => {
-  // eco base is already 28 (range 26-28); cold would want 26, which is
+  // eco base is already 26 (range 24-26); cold would want 24, which is
   // exactly the floor — still valid. Push further with mild weather easing
   // (which for eco is a no-op, base already at ceiling) to confirm clamping.
   const v2 = calculateCoolSenseV2Settings(1, "large", 4.5, 33, 60, "cold");
   assertEquals(v2.mode, "eco");
-  assertEquals(v2.adjusted_temp_c, 26); // 28 - 2, exactly at the floor
+  assertEquals(v2.adjusted_temp_c, 24); // 26 - 2, exactly at the floor
 });
 
 Deno.test("comfort_preference 'warm' composes with weather easing, still clamped to the ceiling", () => {

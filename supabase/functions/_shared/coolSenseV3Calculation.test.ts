@@ -29,7 +29,7 @@ Deno.test("cool + dry (below baseline): setpoint eases warmer and power drops be
 
 Deno.test("adjusted_temp_c always stays within [range.min, range.max] for its mode, across many conditions and comfort preferences", () => {
   const ranges: Record<string, { min: number; max: number }> = {
-    eco: { min: 26, max: 28 },
+    eco: { min: 24, max: 26 },
     moderate: { min: 22, max: 26 },
     full: { min: 19, max: 23 },
   };

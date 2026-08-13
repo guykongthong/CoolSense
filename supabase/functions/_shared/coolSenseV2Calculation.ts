@@ -29,7 +29,7 @@ export interface CoolSenseV2Settings {
 // legitimately CAN move the setpoint colder than base, since it's a direct
 // occupant request, not a re-derivation of the same physics.
 const MODE_TEMP_RANGE: Record<AcMode, { min: number; max: number }> = {
-  eco: { min: 26, max: 28 },
+  eco: { min: 24, max: 26 },
   moderate: { min: 22, max: 26 },
   full: { min: 19, max: 23 },
 };

@@ -65,7 +65,7 @@ Calculate energy (kWh) & CO₂ emissions
 - Large: 400+ m² → 450 m²
 
 **AC Modes** (by occupancy density = people ÷ representative m²):
-- **Eco** (density < 0.05 people/m²): 28°C, fan 1, 2,250 BTU/hr base
+- **Eco** (density < 0.05 people/m²): 26°C, fan 1, 2,250 BTU/hr base
 - **Moderate** (0.05 ≤ density < 0.15 people/m²): 24°C, fan 2, 11,250 BTU/hr base
 - **Full** (density ≥ 0.15 people/m²): 21°C, fan 3, 20,250 BTU/hr base, scales up further with extra people beyond the full threshold (+225 BTU/hr per extra person)
 
@@ -122,7 +122,7 @@ Base BTU/hr is also scaled by a room-size multiplier (small ×0.7, medium ×1.0,
 
 **CoolSense V2** (`supabase/functions/_shared/coolSenseV2Calculation.ts`, **live** — this is what `/calculation` actually runs, not `calculateAcSettings` directly):
 - Same mode selection, BTU sizing, and weather-driven capacity scaling as `calculateAcSettings` (the base/V1 model), plus two additions:
-  1. The setpoint **relaxes** (warmer, less power) when outside conditions are milder than the 33°C/60%RH baseline, within fixed per-mode ranges (eco 26-28°C, moderate 22-26°C, full 19-23°C): +0.3°C of relaxation per °C below baseline temp, +0.02°C per %RH below baseline humidity, then ~5% less required BTU/hr per degree relaxed. Deliberately does **not** tighten the setpoint further when hot/humid — that heat load is already priced into `calculateAcSettings`'s own weather multiplier, so adjusting the setpoint too would double-count it. (This reversed an earlier peer-proposed draft that tightened the setpoint when hot while claiming energy savings — physically contradictory; confirmed the correct direction with the user before implementing.)
+  1. The setpoint **relaxes** (warmer, less power) when outside conditions are milder than the 33°C/60%RH baseline, within fixed per-mode ranges (eco 24-26°C, moderate 22-26°C, full 19-23°C): +0.3°C of relaxation per °C below baseline temp, +0.02°C per %RH below baseline humidity, then ~5% less required BTU/hr per degree relaxed. Deliberately does **not** tighten the setpoint further when hot/humid — that heat load is already priced into `calculateAcSettings`'s own weather multiplier, so adjusting the setpoint too would double-count it. (This reversed an earlier peer-proposed draft that tightened the setpoint when hot while claiming energy savings — physically contradictory; confirmed the correct direction with the user before implementing.)
   2. `room_config.comfort_preference` (`'cold'` | `'neutral'` | `'warm'`, default `'neutral'`) then shifts the setpoint a further ±2°C, applied on top of the weather-eased temp and still clamped to the mode's range, with power scaled ~5%/°C to match (a `'cold'` preference can raise power above the base model's; `'warm'` lowers it further)
 - `calculateCoolSenseV2Settings` returns `base_temp_c` (what V1 alone would set) and `adjusted_temp_c` (the actual setpoint, after weather easing + comfort). `/calculation` stores `adjusted_temp_c` as `ac_calculations.temperature_c` (so existing consumers reading `temperature_c` get the real setpoint) plus `base_temp_c` and `comfort_preference` for traceability
 - `tools/calculation-tester.html`'s 168-hour simulation section charts two series — static (configurable setpoint, default 25°C) vs CoolSense V2 — both computed entirely server-side by `/simulation/run` now that CoolSense V2 is the only comparison model; the tool no longer duplicates any V1/V2 math client-side for this section. Comfort preference is read from the same selector used by the live single-calculation flow.
