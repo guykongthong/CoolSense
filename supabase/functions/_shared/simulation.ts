@@ -43,6 +43,10 @@ export interface SimulationSummary {
   static_v3_cost_baht: number;
   coolsense_v3_cost_baht: number;
   v3_pct_reduction: number;
+  app_energy_kwh: number;
+  net_energy_saved_kwh: number;
+  net_co2_saved_kg: number;
+  net_cost_saved_baht: number;
 }
 
 // The "current system" (static) baseline every simulation compares
@@ -93,6 +97,22 @@ function staticV3PowerKw(roomSize: RoomSize, seer: number, staticTempC: number):
 // Thailand grid figures — see CLAUDE.md "Metrics Calculated".
 const CO2_PER_KWH = 0.5;
 const COST_PER_KWH_BAHT = 5;
+
+// App infrastructure energy footprint — Vercel frontend, Supabase Postgres,
+// edge functions, weatherapi.com calls. See
+// docs/superpowers/specs/2026-08-13-app-energy-integration-design.md for the
+// component-by-component derivation. Kept as separate exported constants
+// (not folded into one number) so they stay independently testable/tunable.
+export const APP_BASELINE_KWH_PER_DAY = 0.1051;
+export const APP_PER_RUN_OVERHEAD_KWH = 0.00185;
+
+// Zero duration means no run happened at all — no baseline prorated, no
+// per-run overhead charged. Guards the "empty input" summary staying
+// all-zero (matches the existing empty-input test for the other fields).
+function appEnergyKwh(durationHours: number): number {
+  if (durationHours <= 0) return 0;
+  return (APP_BASELINE_KWH_PER_DAY / 24) * durationHours + APP_PER_RUN_OVERHEAD_KWH;
+}
 
 // Representative outdoor conditions per categorical weather_condition input,
 // for scenario simulation where hitting weatherapi.com 168 times per run
@@ -299,6 +319,9 @@ export function runSimulation(
   const coolsense_v3_energy_kwh = coolsenseV3CumulativeKwh;
   const v3EnergySaved = static_v3_energy_kwh - coolsense_v3_energy_kwh;
 
+  const app_energy_kwh = appEnergyKwh(peopleCounts.length);
+  const net_energy_saved_kwh = v3EnergySaved - app_energy_kwh;
+
   const summary: SimulationSummary = {
     duration_hours: peopleCounts.length,
     current_energy_kwh,
@@ -315,6 +338,10 @@ export function runSimulation(
     static_v3_cost_baht: static_v3_energy_kwh * COST_PER_KWH_BAHT,
     coolsense_v3_cost_baht: coolsense_v3_energy_kwh * COST_PER_KWH_BAHT,
     v3_pct_reduction: static_v3_energy_kwh > 0 ? (v3EnergySaved / static_v3_energy_kwh) * 100 : 0,
+    app_energy_kwh,
+    net_energy_saved_kwh,
+    net_co2_saved_kg: net_energy_saved_kwh * CO2_PER_KWH,
+    net_cost_saved_baht: net_energy_saved_kwh * COST_PER_KWH_BAHT,
   };
 
   return { hourly, summary };
