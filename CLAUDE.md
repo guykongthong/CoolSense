@@ -274,3 +274,50 @@ For all Thai hotels, that's 158,000 metric tons of CO₂ prevented annually."
 - Demo doesn't crash
 
 ---
+
+## 자주 사용하는 명령어
+
+**프론트엔드 (`frontend/`, Vue 3 + TypeScript + Vite)**
+- 개발 서버: `npm run dev`
+- 빌드: `npm run build` (`vue-tsc -b && vite build`)
+- 린트: `npm run lint`
+- 타입체크만: `npm run typecheck` (`vue-tsc --noEmit`)
+- 환경변수: `frontend/.env.example` 참고 (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`)
+
+**백엔드 (`supabase/functions/`, Deno Edge Functions)**
+- 로컬 Supabase 스택 기동: `supabase start` (Studio 54323 / API 54321 / DB 54322)
+- 로컬에서 함수 서빙(날씨 함수처럼 시크릿이 필요하면 `--env-file` 필수): `supabase functions serve --env-file supabase/.env`
+- 함수별 린트: `cd supabase/functions/<함수명> && deno lint`
+- 함수별 타입체크: `cd supabase/functions/<함수명> && deno check --config deno.json index.ts`
+- 공유 로직 테스트(현재 자동화 테스트는 이곳뿐): `deno test supabase/functions/_shared/`
+- 마이그레이션 로컬 적용/리셋: `supabase db reset`
+- 새 마이그레이션 생성: `supabase migration new <이름>`
+- 각 함수는 curl 호출 예시를 자기 `index.ts` 파일 하단 주석에 포함하고 있음 (그걸 우선 참고)
+
+**계산 로직만 빠르게 확인**
+- `tools/calculation-tester.html`을 브라우저로 직접 열면 Supabase 없이 `calculateAcSettings` 로직을 바로 테스트 가능 (아래 "복제된 계산 로직" 주의사항 참고)
+
+---
+
+## 아키텍처 개요
+
+**최상위 3영역:** `frontend/`(Vue 3 + TS + Vite), `supabase/functions/`(Deno Edge Functions), `supabase/migrations/`(Postgres 스키마, 시간순 SQL 파일).
+
+**요청/데이터 흐름 (함수 간 호출 관계가 아니라 테이블을 매개로 연결됨):**
+1. `occupancy-readings` 함수가 사람 수를 `occupancy_readings` 테이블에 기록 (현재는 수동 입력용 POST 엔드포인트; 추후 ML 카메라 파이프라인으로 대체 예정 — 컬럼 스키마가 바뀔 수 있다는 TODO가 여러 파일에 남아 있음). `occupancy` 함수는 반대로 최신 값을 조회만 하며, 테이블이 비어 있으면 mock 데이터로 폴백.
+2. `room-config` 함수가 `room_config`의 단일 행(`id=1`)을 갱신 — 건물명/위치/방크기/SEER/EGAT 라벨. `location`이 태국이 아닐 때 `egat_label`을 설정하려는 요청은 거부하고, `location`을 태국 밖으로 바꾸는 요청은 기존 라벨을 자동으로 지움 (UI 검증과 별개로 서버에서도 강제).
+3. `weather` 함수가 `room_config.location`을 조회해 weatherapi.com에서 현재 날씨를 가져와 `weather_readings`에 기록.
+4. `calculation` 함수가 `room_config` + 최신 `occupancy_readings` + 최신 `weather_readings`를 병렬로 읽어 조합한 뒤, **핵심 비즈니스 로직인 `supabase/functions/_shared/acCalculation.ts`의 `calculateAcSettings()`** 하나만 호출해 결과를 계산하고 `ac_calculations`에 저장.
+5. `simulation` 함수는 아직 미구현 상태(`"not implemented yet"`만 반환) — 168시간 mock 데이터 생성과 현재 vs 스마트 시스템 비교가 남은 작업.
+6. 프론트엔드(`useOccupancy.ts`)는 Supabase Realtime으로 `occupancy_readings` INSERT를 구독하도록 배선되어 있지만, `App.vue`는 아직 Vite 기본 템플릿(`HelloWorld.vue`) 그대로라 실제 입력 폼/대시보드 UI는 미구현.
+
+**주의할 점:**
+- 계산 로직은 `supabase/functions/_shared/acCalculation.ts`에 있고, 같은 로직이 `tools/calculation-tester.html`에도 그대로 복제되어 있음(자동 동기화 없음) — 알고리즘/상수를 바꾸면 두 파일을 함께 수정해야 함.
+- 모든 Edge Function은 `withSupabase({ auth: ["publishable", "secret"] })`로 감싸져 있고 `ctx.supabaseAdmin`(서비스 롤)으로 DB에 접근. 이 MVP는 RLS를 켜지 않고 `grant`문으로만 테이블 접근을 제어하므로(`supabase/migrations`의 grant 마이그레이션 참고), 새 테이블을 추가하면 grant도 함께 추가해야 함 — 빠뜨리면 "permission denied for table" 에러가 조용히 폴백 코드에 삼켜질 수 있음(`calculation` 함수가 실제로 이 문제를 겪었던 이력이 있음, 관련 마이그레이션 주석 참고).
+- `room_config`는 `id=1` 단일 행 설계 — 멀티 빌딩/멀티 룸을 지원하지 않음(의도된 MVP 범위 제한, 위 "What NOT to Include" 참고).
+
+**CI/배포:**
+- `.github/workflows/ci.yml` (dev/main 대상 PR, dev push): 프론트엔드는 lint+typecheck, 엣지 함수는 함수별 `deno lint`/`deno check` + `_shared` 테스트만 수행 — 로컬 Supabase 스택을 띄우지 않는 정적 검사 위주.
+- `.github/workflows/deploy.yml` (main push 시): 프론트엔드는 Vercel로, 엣지 함수는 `supabase functions deploy`로 각각 배포.
+
+---
