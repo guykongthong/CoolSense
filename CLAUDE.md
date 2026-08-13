@@ -14,7 +14,7 @@
 
 **Problem:** AC systems waste energy running full blast in empty/low-occupancy rooms (hotels, offices, malls)
 
-**Solution:** Smart AC system that adjusts temperature & fan speed based on occupancy (people count, currently manual input, ML camera-based counting planned)
+**Solution:** Smart AC system that adjusts temperature & fan speed based on occupancy (people count, either manual input or live webcam counting via Gemini vision — see `supabase/functions/occupancy-vision`)
 
 **Impact:** Measurable carbon reduction + energy savings
 
@@ -36,13 +36,13 @@
 - Building name
 - Location (manual text input for now — IP geolocation deferred; also feeds the future weather-by-location feature)
 - Room size (small/medium/large — public-space scale, see below)
-- Number of people in the room (currently a manual slider/number input; will be replaced by ML-based people counting from camera input later — see `supabase/functions/occupancy`)
+- Number of people in the room — either a manual slider/number input (`source: 'manual'`, via `supabase/functions/occupancy-readings`), or live webcam counting: the frontend opens the browser camera and every 5s posts a captured frame to `supabase/functions/occupancy-vision`, which asks Gemini vision for a headcount estimate and inserts it (`source: 'camera_gemini'`). Either path just inserts a new `occupancy_readings` row — `supabase/functions/occupancy` only ever reads the latest one, regardless of source. See "Camera-based Occupancy Counting" below.
 - Weather is **not** manually selected — outside temperature and humidity are fetched live from weatherapi.com for `room_config.location` (see `supabase/functions/weather`), not a hot/warm/cool dropdown
 - AC unit efficiency (SEER) — "Auto" (4.5 SEER, the standard reference unit) or a custom SEER value; global per room, always shown
 - Thailand EGAT efficiency label (1-5 stars, or "premium") — **only shown when location is Thailand**; cosmetic/credibility only, does not affect the calculation
 - Comfort preference (cold/neutral/warm) — shifts the CoolSense V2 setpoint ±2°C; see below
 
-> Occupancy is **not** derived from CO₂ level. People count comes directly from an `occupancy_readings` table (mocked today, ML-populated later). CO₂ was the original plan but was dropped in favor of direct people counting.
+> Occupancy is **not** derived from CO₂ level. People count comes directly from an `occupancy_readings` table (mock, manual, and live Gemini-vision rows all coexist, distinguished only by `source`). CO₂ was the original plan but was dropped in favor of direct people counting.
 
 **Algorithm Logic:**
 ```
@@ -87,7 +87,7 @@ Base BTU/hr is also scaled by a room-size multiplier (small ×0.7, medium ×1.0,
 - Building name input
 - Location input (text; drives the conditional EGAT field and later weather-by-location)
 - Room size dropdown
-- People-count input (slider/number, wide enough range e.g. 0-100 to demo all modes — placeholder for future ML camera-based counting)
+- People-count input (slider/number, wide enough range e.g. 0-100 to demo all modes) — an alternative to this is the live camera monitor described below
 - No weather selector — outside temperature/humidity are fetched automatically from weatherapi.com by location
 - AC unit efficiency selector (Auto / custom SEER) — always shown, global per room
 - Thailand EGAT efficiency label selector — only shown when location is Thailand
@@ -139,6 +139,15 @@ Base BTU/hr is also scaled by a room-size multiplier (small ×0.7, medium ×1.0,
   - Line graph: Power over 200 hours
   - Area chart: Cumulative energy/CO₂
 - `tools/calculation-tester.html` has a working reference implementation of both charts (hand-rolled inline SVG, no external chart library) if useful for the real frontend
+
+**Camera-based Occupancy Counting (Gemini)** (`supabase/functions/occupancy-vision`, frontend: `PeopleView.vue` + `useCameraOccupancy.ts`):
+- A single-frame-in, single-count-out endpoint: `POST /occupancy-vision` (`{ image_base64, mime_type }`) sends the frame to Gemini vision via Vertex AI (model id in `_shared/geminiOccupancy.ts`, `GEMINI_MODEL`) with `generationConfig.responseSchema` forcing a `{ people_count: integer }` JSON response, then inserts `{ people_count, source: 'camera_gemini' }` into `occupancy_readings` and returns `{ people_count, reading }`. Requires `GCP_SERVICE_ACCOUNT_JSON` (local: `supabase/.env`, the full service-account key JSON on one line; deployed: `supabase secrets set GCP_SERVICE_ACCOUNT_JSON='...'`) — see the Auth note below for why this is a service account and not a plain API key.
+- Request/response shaping (`buildGeminiRequestBody`, `parseGeminiPeopleCount`) lives in `_shared/geminiOccupancy.ts` so it's unit-testable without a live Gemini call — mirrors the `_shared/simulation.ts` pattern of keeping pure logic out of `index.ts`.
+- **"Real-time" is simulated, not literal video streaming to Gemini**: sending video to Gemini was considered and rejected — Gemini's video understanding also just samples frames internally, but with much higher upload/processing latency than a single image, which works against a counter that's supposed to update continuously. Instead, `useCameraOccupancy.ts` opens the browser camera with `getUserMedia` (rendered live in a `<video>` element — no server round-trip for the video itself), then every 5s captures the current frame to a canvas and POSTs it to `/occupancy-vision`, updating the displayed count each cycle. A failed cycle (network/API error) is logged and retried on the next interval — it never kills the whole monitoring loop.
+- Monitoring is user-initiated (a Start/Stop toggle in `PeopleView.vue`) and releases the camera (`MediaStreamTrack.stop()`) on Stop or component unmount — it never auto-starts on page load, both because camera permission requires a user gesture in most browsers and to avoid an unbounded background loop of Gemini calls.
+- No captured frame is stored anywhere (not in Supabase Storage, not on disk) — only the resulting `people_count` persists, in `occupancy_readings`.
+- **Accuracy caveat**: Gemini vision counting is reasonably accurate for small-to-moderate groups (roughly ≤20-30 people) but, like other general-purpose vision LLMs, degrades on dense/large crowds — treat `source: 'camera_gemini'` readings as an estimate, not a precise count. This is a known limitation, not a bug to "fix" by tweaking the prompt.
+- **Auth: Vertex AI + GCP service account, not a plain Gemini Developer API key — reversed from the original decision, see below.** `occupancy-vision` originally used a plain `GEMINI_API_KEY` (Gemini Developer API), since it's a single-shot REST call per frame (no streaming), unlike a teammate's speech-recognition feature which needed a GCP service account + OAuth token because *that* API is only usable in streaming mode. That plain-API-key path hit exactly the escape hatch this doc used to flag: the project's GCP billing credit (₩480,000, already linked to the project's Cloud Billing account) turned out **not** to apply to the Gemini Developer API's separate prepay credit wallet (confirmed via `https://ai.studio` → project → "Gemini API 결제": balance stayed ₩0 even after linking Cloud Billing) — so the Developer API stayed rate-limited regardless of the linked billing account. Switched to Vertex AI instead, which bills directly through the same Cloud Billing account the ₩480,000 credit is already on. Auth flow: `_shared/googleServiceAuth.ts` signs a JWT with the service account's private key (RS256 via Web Crypto, no external Google Auth library) and exchanges it at `oauth2.googleapis.com/token` for a short-lived bearer token (cached in-module until <60s of life remain), which `occupancy-vision/index.ts` sends as `Authorization: Bearer` to `_shared/geminiOccupancy.ts`'s `vertexEndpointUrl()` (`{location}-aiplatform.googleapis.com/.../publishers/google/models/{model}:generateContent`). The service account needs the **"Vertex AI User" (`roles/aiplatform.user`)** role on the project — when granting it via the Cloud Console IAM role picker, the free-text search surfaces several similarly-named decoy roles first (`AI Platform 관리자` / `roles/ml.admin` is a different, legacy product; `Vertex AI Platform 프로비저닝 처리량 관리자` is a narrow provisioned-throughput role) — granting by exact role ID via `gcloud projects add-iam-policy-binding <project> --member=serviceAccount:<sa-email> --role=roles/aiplatform.user` sidesteps the ambiguity. Also note Vertex AI's `generateContent` requires an explicit `role: "user"` on each `contents[]` entry (`buildGeminiRequestBody` in `geminiOccupancy.ts`) — the Gemini Developer API defaults this if omitted, but Vertex AI rejects the request with `400 Please use a valid role: user, model.` without it.
 
 ---
 
@@ -245,7 +254,7 @@ Base BTU/hr is also scaled by a room-size multiplier (small ×0.7, medium ×1.0,
 
 - Real AC hardware control
 - Real CO₂ sensors
-- Machine learning
+- Building/training a custom ML model — camera-based occupancy counting calls the third-party Gemini vision API instead (see "Camera-based Occupancy Counting" above), no in-house model
 - Multi-building database
 - User authentication
 - Mobile responsiveness
@@ -287,7 +296,8 @@ For all Thai hotels, that's 158,000 metric tons of CO₂ prevented annually."
 
 **백엔드 (`supabase/functions/`, Deno Edge Functions)**
 - 로컬 Supabase 스택 기동: `supabase start` (Studio 54323 / API 54321 / DB 54322)
-- 로컬에서 함수 서빙(날씨 함수처럼 시크릿이 필요하면 `--env-file` 필수): `supabase functions serve --env-file supabase/.env`
+- 로컬에서 함수 서빙(날씨 함수·`occupancy-vision`처럼 시크릿이 필요하면 `--env-file` 필수): `supabase functions serve --env-file supabase/.env`
+- `occupancy-vision` 로컬 실행에는 `supabase/.env`에 `GCP_SERVICE_ACCOUNT_JSON`(Vertex AI User 역할이 부여된 서비스 계정 키 JSON, 한 줄로) 설정이 필요 (배포 시 `supabase secrets set GCP_SERVICE_ACCOUNT_JSON='...'`) — Gemini Developer API 키가 아님, 이유는 위 "Camera-based Occupancy Counting"의 Auth 항목 참고
 - 함수별 린트: `cd supabase/functions/<함수명> && deno lint`
 - 함수별 타입체크: `cd supabase/functions/<함수명> && deno check --config deno.json index.ts`
 - 공유 로직 테스트(현재 자동화 테스트는 이곳뿐): `deno test supabase/functions/_shared/`
@@ -305,7 +315,7 @@ For all Thai hotels, that's 158,000 metric tons of CO₂ prevented annually."
 **최상위 3영역:** `frontend/`(Vue 3 + TS + Vite), `supabase/functions/`(Deno Edge Functions), `supabase/migrations/`(Postgres 스키마, 시간순 SQL 파일).
 
 **요청/데이터 흐름 (함수 간 호출 관계가 아니라 테이블을 매개로 연결됨):**
-1. `occupancy-readings` 함수가 사람 수를 `occupancy_readings` 테이블에 기록 (현재는 수동 입력용 POST 엔드포인트; 추후 ML 카메라 파이프라인으로 대체 예정 — 컬럼 스키마가 바뀔 수 있다는 TODO가 여러 파일에 남아 있음). `occupancy` 함수는 반대로 최신 값을 조회만 하며, 테이블이 비어 있으면 mock 데이터로 폴백.
+1. `occupancy_readings` 테이블에는 두 함수가 값을 채울 수 있다 — `occupancy-readings`(수동 입력용 POST, `source: 'manual'`)와 `occupancy-vision`(웹캠 프레임을 Gemini vision으로 분석해 5초 주기로 기록, `source: 'camera_gemini'` — 자세한 흐름은 위 "Camera-based Occupancy Counting" 참고). `occupancy` 함수는 반대로 최신 값을 조회만 하며(소스 무관, 항상 최신 1건), 테이블이 비어 있으면 mock 데이터로 폴백.
 2. `room-config` 함수가 `room_config`의 단일 행(`id=1`)을 갱신 — 건물명/위치/방크기/SEER/EGAT 라벨. `location`이 태국이 아닐 때 `egat_label`을 설정하려는 요청은 거부하고, `location`을 태국 밖으로 바꾸는 요청은 기존 라벨을 자동으로 지움 (UI 검증과 별개로 서버에서도 강제).
 3. `weather` 함수가 `room_config.location`을 조회해 weatherapi.com에서 현재 날씨를 가져와 `weather_readings`에 기록.
 4. `calculation` 함수가 `room_config` + 최신 `occupancy_readings` + 최신 `weather_readings`를 병렬로 읽어 조합한 뒤, **핵심 비즈니스 로직인 `supabase/functions/_shared/acCalculation.ts`의 `calculateAcSettings()`** 하나만 호출해 결과를 계산하고 `ac_calculations`에 저장.

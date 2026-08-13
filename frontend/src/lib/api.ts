@@ -150,6 +150,15 @@ export function postOccupancyReading(peopleCount: number, source = 'manual'): Pr
   return invoke('occupancy-readings', { method: 'POST', body: { people_count: peopleCount, source } });
 }
 
+export interface OccupancyVisionResult {
+  people_count: number;
+  reading: OccupancyReading;
+}
+
+export function postOccupancyPhoto(imageBase64: string, mimeType: string): Promise<OccupancyVisionResult> {
+  return invoke('occupancy-vision', { method: 'POST', body: { image_base64: imageBase64, mime_type: mimeType } });
+}
+
 export function fetchWeather(): Promise<WeatherReading> {
   return invoke('weather', { method: 'POST' });
 }

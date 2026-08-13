@@ -2,7 +2,22 @@
 import { computed, ref } from 'vue';
 import Card from '../components/ui/Card.vue';
 import StatCard from '../components/ui/StatCard.vue';
+import { useCameraOccupancy } from '../composables/useCameraOccupancy';
+import { useOccupancy } from '../composables/useOccupancy';
 import { t } from '../lib/i18n';
+
+const { videoRef, isMonitoring, isAnalyzing, latestCount, error, start, stop } = useCameraOccupancy();
+const { latestReading } = useOccupancy();
+
+const currentOccupancyDisplay = computed(() => {
+  // While the camera is monitoring, prefer its direct Gemini response over the
+  // DB/Realtime round-trip — it's the same value a moment sooner, and immune to
+  // other sources (manual input, mock data) overwriting it via Realtime INSERT.
+  if (isMonitoring.value && latestCount.value !== null) {
+    return latestCount.value.toLocaleString();
+  }
+  return latestReading.value ? latestReading.value.people_count.toLocaleString() : '—';
+});
 
 // Static placeholder content matching the design comp — this page isn't
 // wired to occupancy_readings yet (multi-zone breakdown has no equivalent
@@ -76,64 +91,86 @@ const activityRange = ref<'12h' | '24h'>('24h');
   <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
     <StatCard
       :label="t('people.currentOccupancy')"
-      value="1,284"
+      :value="currentOccupancyDisplay"
       icon="group"
-    >
-      <div class="flex items-center gap-2">
-        <span class="flex items-center text-primary-container text-label-sm bg-secondary-fixed px-2 py-1 rounded-full">
-          <span class="material-symbols-outlined text-[16px] mr-1">trending_up</span>+12%
-        </span>
-        <span class="text-label-sm text-outline">{{ t('people.vsLastHour') }}</span>
-      </div>
-    </StatCard>
+    />
 
-    <div class="grid grid-cols-1 sm:grid-cols-2 gap-6 lg:col-span-2">
-      <div class="bg-white rounded-xl border border-slate-200 shadow-[0_4px_20px_rgba(6,78,59,0.05)] p-6 flex flex-col justify-between h-48">
-        <div class="flex justify-between items-start mb-4">
-          <h3 class="text-label-md text-on-surface-variant">
-            {{ t('people.peakOccupancyToday') }}
-          </h3>
-          <span class="material-symbols-outlined text-outline">show_chart</span>
-        </div>
-        <div>
-          <div class="text-headline-lg text-on-surface">
-            1,450
-          </div>
-          <p class="text-label-sm text-outline mt-1">
-            {{ t('people.peakAt') }}
-          </p>
-        </div>
-        <div class="w-full bg-surface-container h-2 rounded-full mt-4 overflow-hidden">
-          <div
-            class="h-full rounded-full bg-gradient-to-r from-[#10B981] to-primary-container"
-            style="width: 85%"
-          />
-        </div>
+    <div class="bg-white rounded-xl border border-slate-200 shadow-[0_4px_20px_rgba(6,78,59,0.05)] p-6 flex flex-col justify-between h-48 lg:col-span-2">
+      <div class="flex justify-between items-start mb-4">
+        <h3 class="text-label-md text-on-surface-variant">
+          {{ t('people.peakOccupancyToday') }}
+        </h3>
+        <span class="material-symbols-outlined text-outline">show_chart</span>
       </div>
-
-      <div class="bg-white rounded-xl border border-slate-200 shadow-[0_4px_20px_rgba(6,78,59,0.05)] p-6 flex flex-col justify-between h-48">
-        <div class="flex justify-between items-start mb-4">
-          <h3 class="text-label-md text-on-surface-variant">
-            {{ t('people.averageStayTime') }}
-          </h3>
-          <span class="material-symbols-outlined text-outline">schedule</span>
+      <div>
+        <div class="text-headline-lg text-on-surface">
+          1,450
         </div>
-        <div>
-          <div class="text-headline-lg text-on-surface">
-            45 min
-          </div>
-          <p class="text-label-sm text-outline mt-1">
-            {{ t('people.minFromYesterday') }}
-          </p>
-        </div>
-        <div class="flex gap-2 mt-4">
-          <span class="bg-error-container text-on-error-container text-label-sm px-2 py-1 rounded-full border border-error/20">{{
-            t('people.optimal')
-          }}</span>
-        </div>
+        <p class="text-label-sm text-outline mt-1">
+          {{ t('people.peakAt') }}
+        </p>
+      </div>
+      <div class="w-full bg-surface-container h-2 rounded-full mt-4 overflow-hidden">
+        <div
+          class="h-full rounded-full bg-gradient-to-r from-[#10B981] to-primary-container"
+          style="width: 85%"
+        />
       </div>
     </div>
   </div>
+
+  <Card :title="t('people.camera.title')">
+    <template #actions>
+      <button
+        v-if="!isMonitoring"
+        type="button"
+        class="px-3 py-1 text-label-sm rounded-lg bg-primary text-on-primary transition-colors hover:opacity-90"
+        @click="start"
+      >
+        {{ t('people.camera.start') }}
+      </button>
+      <button
+        v-else
+        type="button"
+        class="px-3 py-1 text-label-sm rounded-lg bg-error text-on-error transition-colors hover:opacity-90"
+        @click="stop"
+      >
+        {{ t('people.camera.stop') }}
+      </button>
+    </template>
+
+    <div class="relative w-full aspect-video bg-surface-container-low rounded-lg overflow-hidden flex items-center justify-center">
+      <video
+        ref="videoRef"
+        autoplay
+        muted
+        playsinline
+        class="w-full h-full object-cover"
+        :class="{ hidden: !isMonitoring }"
+      />
+      <div
+        v-if="!isMonitoring"
+        class="text-on-surface-variant text-label-sm flex flex-col items-center gap-2"
+      >
+        <span class="material-symbols-outlined text-[40px]">videocam_off</span>
+        {{ t('people.camera.notStarted') }}
+      </div>
+      <div
+        v-if="isMonitoring"
+        class="absolute top-3 right-3 bg-black/60 text-white text-label-sm px-3 py-1 rounded-full flex items-center gap-2"
+      >
+        <span class="material-symbols-outlined text-[16px]">group</span>
+        <span v-if="latestCount !== null">{{ t('people.camera.count', { n: latestCount }) }}</span>
+        <span v-else-if="isAnalyzing">{{ t('people.camera.analyzing') }}</span>
+      </div>
+    </div>
+    <p
+      v-if="error"
+      class="text-label-sm text-error mt-3"
+    >
+      {{ error === 'permission_denied' ? t('people.camera.permissionDenied') : t('people.camera.analysisFailed') }}
+    </p>
+  </Card>
 
   <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
     <Card
