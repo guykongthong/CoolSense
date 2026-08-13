@@ -20,6 +20,7 @@ export interface RoomConfig {
   ac_seer: number;
   egat_label: EgatLabel | null;
   comfort_preference: ComfortPreference;
+  rated_capacity_btu_per_hr: number | null;
   updated_at: string;
 }
 
@@ -30,6 +31,7 @@ export interface RoomConfigUpdate {
   ac_seer?: number;
   egat_label?: EgatLabel | null;
   comfort_preference?: ComfortPreference;
+  rated_capacity_btu_per_hr?: number | null;
 }
 
 export interface OccupancyReading {
@@ -67,6 +69,7 @@ export interface AcCalculation {
   fan_speed: number;
   power_kw: number;
   btu_per_hr: number;
+  capacity_constrained: boolean;
   calculated_at?: string;
 }
 

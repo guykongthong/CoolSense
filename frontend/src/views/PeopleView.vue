@@ -129,6 +129,10 @@ const activityRange = ref<'12h' | '24h'>('24h');
       icon="thermostat"
     >
       <span class="text-label-sm text-outline">{{ acModeDisplay }}</span>
+      <span
+        v-if="latestCalculation?.capacity_constrained"
+        class="ml-2 text-label-sm text-error"
+      >{{ t('people.acUndersized') }}</span>
     </StatCard>
   </div>
 

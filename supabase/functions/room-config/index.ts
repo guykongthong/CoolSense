@@ -23,6 +23,7 @@ interface RoomConfigBody {
   ac_seer?: number;
   egat_label?: string | null;
   comfort_preference?: string;
+  rated_capacity_btu_per_hr?: number | null;
 }
 
 async function handleGet(ctx: SupabaseContext): Promise<Response> {
@@ -49,7 +50,7 @@ async function handleUpdate(req: Request, ctx: SupabaseContext): Promise<Respons
     return Response.json({ message: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { building_name, room_size, location, ac_seer, egat_label, comfort_preference } = body;
+  const { building_name, room_size, location, ac_seer, egat_label, comfort_preference, rated_capacity_btu_per_hr } = body;
 
   if (room_size !== undefined && !VALID_ROOM_SIZES.includes(room_size)) {
     return Response.json(
@@ -59,6 +60,15 @@ async function handleUpdate(req: Request, ctx: SupabaseContext): Promise<Respons
   }
   if (ac_seer !== undefined && (typeof ac_seer !== "number" || ac_seer < MIN_AC_SEER || ac_seer > MAX_AC_SEER)) {
     return Response.json({ message: `ac_seer must be a number between ${MIN_AC_SEER} and ${MAX_AC_SEER}` }, {
+      status: 400,
+    });
+  }
+  if (
+    rated_capacity_btu_per_hr !== undefined &&
+    rated_capacity_btu_per_hr !== null &&
+    (typeof rated_capacity_btu_per_hr !== "number" || rated_capacity_btu_per_hr <= 0)
+  ) {
+    return Response.json({ message: "rated_capacity_btu_per_hr must be a positive number, or null" }, {
       status: 400,
     });
   }
@@ -101,6 +111,7 @@ async function handleUpdate(req: Request, ctx: SupabaseContext): Promise<Respons
   if (ac_seer !== undefined) update.ac_seer = ac_seer;
   if (egat_label !== undefined) update.egat_label = egat_label;
   if (comfort_preference !== undefined) update.comfort_preference = comfort_preference;
+  if (rated_capacity_btu_per_hr !== undefined) update.rated_capacity_btu_per_hr = rated_capacity_btu_per_hr;
 
   // Moving location away from Thailand invalidates any previously stored
   // label, even if this request didn't touch egat_label itself.

@@ -6,6 +6,7 @@ interface AcCalculationReading {
   id: string;
   temperature_c: number;
   ac_mode: AcMode;
+  capacity_constrained: boolean;
   calculated_at: string;
 }
 
@@ -18,7 +19,7 @@ export function useAcCalculation() {
   onMounted(async () => {
     const { data } = await supabase
       .from('ac_calculations')
-      .select('id, temperature_c, ac_mode, calculated_at')
+      .select('id, temperature_c, ac_mode, capacity_constrained, calculated_at')
       .order('calculated_at', { ascending: false })
       .limit(1)
       .maybeSingle();

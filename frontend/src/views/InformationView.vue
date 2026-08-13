@@ -8,10 +8,15 @@ import { ROOM_IDS, type RoomId } from '../lib/rooms';
 // page. Several fields here have no backing data/schema yet:
 //   - "Select Room" (multi-room) — room_config is a single-room singleton today
 //   - "Active Device" block — no device table exists
-//   - "Cooling Capacity (BTU/h)" / Korean-AC grade — not modeled in
-//     acCalculation.ts or room_config, and deliberately not wired (they'd
-//     change the algorithm, not just this form). These stay local-only,
-//     never sent to the backend.
+//   - Korean-AC grade — not modeled in acCalculation.ts or room_config, and
+//     deliberately not wired (mirrors the Thailand EGAT label precedent:
+//     cosmetic efficiency grades don't affect the calculation). Stays
+//     local-only, never sent to the backend.
+// Cooling Capacity DOES map to room_config.rated_capacity_btu_per_hr and
+// actually affects the calculation now — see runCalculation.ts's
+// applyCapacityCeiling: if it's lower than the computed required BTU/hr,
+// the unit is capacity-constrained (runs at its own max, flagged rather
+// than silently under-cooling).
 // Only the first device maps to the real room_config singleton — "Add
 // Device" stays decorative until multi-room/multi-device is actually
 // modeled server-side.
@@ -71,6 +76,7 @@ onMounted(async () => {
     primary.roomSize = ROOM_SIZE_TO_LETTER[config.room_size];
     primary.starRating = config.egat_label && config.egat_label !== 'premium' ? config.egat_label : '';
     primary.seerValue = String(config.ac_seer);
+    primary.coolingCapacity = config.rated_capacity_btu_per_hr !== null ? String(config.rated_capacity_btu_per_hr) : '';
   } catch {
     loadError.value = true;
   } finally {
@@ -92,6 +98,7 @@ async function saveDevice(idx: number) {
       room_size: LETTER_TO_ROOM_SIZE[device.roomSize],
       ac_seer: Number(device.seerValue),
       egat_label: isThailand.value && device.starRating ? (device.starRating as '3' | '4' | '5') : null,
+      rated_capacity_btu_per_hr: device.coolingCapacity ? Number(device.coolingCapacity) : null,
     });
     saveSuccess.value = true;
   } catch {

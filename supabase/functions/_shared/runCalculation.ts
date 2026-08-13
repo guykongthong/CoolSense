@@ -15,6 +15,7 @@ interface RoomConfigRow {
   room_size: RoomSize;
   ac_seer: number;
   comfort_preference: ComfortPreference;
+  rated_capacity_btu_per_hr: number | null;
 }
 
 interface OccupancyReadingRow {
@@ -35,6 +36,25 @@ function weatherLabel(tempC: number): "hot" | "warm" | "cool" {
   return "cool";
 }
 
+// If the room's actual AC unit (room_config.rated_capacity_btu_per_hr,
+// entered on the Information page) can't deliver the computed required
+// BTU/hr, the unit runs at its own max and still can't fully meet demand.
+// required_btu_per_hr itself is left unchanged (it still reports true
+// demand) — only power_kw is capped at what the unit can actually draw, and
+// capacity_constrained flags the mismatch. No rated capacity set (the
+// common case) is a no-op — behavior is identical to before this existed.
+export function applyCapacityCeiling(
+  requiredBtuPerHr: number,
+  powerKw: number,
+  seer: number,
+  ratedCapacityBtuPerHr: number | null,
+): { power_kw: number; capacity_constrained: boolean } {
+  if (ratedCapacityBtuPerHr === null || ratedCapacityBtuPerHr >= requiredBtuPerHr) {
+    return { power_kw: powerKw, capacity_constrained: false };
+  }
+  return { power_kw: ratedCapacityBtuPerHr / (seer * 1000), capacity_constrained: true };
+}
+
 /**
  * Reads the current room config + latest occupancy/weather readings, runs
  * CoolSense V2, and inserts a fresh ac_calculations row. Shared by the
@@ -43,23 +63,6 @@ function weatherLabel(tempC: number): "hot" | "warm" | "cool" {
  * setting actually reacts to the camera instead of only updating when
  * someone happens to hit GET /calculation).
  */
-export interface RunCalculationResult {
-  calculation: Record<string, unknown> | null;
-  error: { message: string } | null;
-  // Present even on error, so callers can build a fallback response (matches
-  // the shape calculation/index.ts returned before this was extracted).
-  fallback: {
-    mode: string;
-    temperature_c: number;
-    fan_speed: number;
-    power_kw: number;
-    btu_per_hr: number;
-    comfort_preference: ComfortPreference;
-    people_count: number;
-    room_size: RoomSize;
-  };
-}
-
 export async function runCalculation(
   // deno-lint-ignore no-explicit-any
   db: any,
@@ -69,7 +72,7 @@ export async function runCalculation(
     { data: OccupancyReadingRow | null },
     { data: WeatherReadingRow | null },
   ] = await Promise.all([
-    db.from("room_config").select("room_size, ac_seer, comfort_preference").eq("id", 1).maybeSingle(),
+    db.from("room_config").select("room_size, ac_seer, comfort_preference, rated_capacity_btu_per_hr").eq("id", 1).maybeSingle(),
     db
       .from("occupancy_readings")
       // Excludes mock/simulation data — this is the live calculation path,
@@ -94,6 +97,7 @@ export async function runCalculation(
   const outsideTempC = weatherReading?.temp_c ?? DEFAULT_OUTSIDE_TEMP_C;
   const humidityPct = weatherReading?.humidity_pct ?? DEFAULT_HUMIDITY_PCT;
   const comfortPreference = roomConfig?.comfort_preference ?? DEFAULT_COMFORT_PREFERENCE;
+  const ratedCapacityBtuPerHr = roomConfig?.rated_capacity_btu_per_hr ?? null;
 
   // CoolSense V2: base mode/BTU/weather calc, plus setpoint relaxation
   // under mild weather and the occupant's comfort_preference. See
@@ -105,6 +109,13 @@ export async function runCalculation(
     outsideTempC,
     humidityPct,
     comfortPreference,
+  );
+
+  const { power_kw, capacity_constrained } = applyCapacityCeiling(
+    settings.btu_per_hr,
+    settings.power_kw,
+    acSeer,
+    ratedCapacityBtuPerHr,
   );
 
   const { data: calculation, error } = await db
@@ -123,8 +134,9 @@ export async function runCalculation(
       base_temp_c: settings.base_temp_c,
       comfort_preference: comfortPreference,
       fan_speed: settings.fan_speed,
-      power_kw: settings.power_kw,
+      power_kw,
       btu_per_hr: settings.btu_per_hr,
+      capacity_constrained,
     })
     .select()
     .maybeSingle();
@@ -133,8 +145,9 @@ export async function runCalculation(
     mode: settings.mode,
     temperature_c: settings.adjusted_temp_c,
     fan_speed: settings.fan_speed,
-    power_kw: settings.power_kw,
+    power_kw,
     btu_per_hr: settings.btu_per_hr,
+    capacity_constrained,
     comfort_preference: comfortPreference,
     people_count: peopleCount,
     room_size: roomSize,
@@ -145,4 +158,22 @@ export async function runCalculation(
   }
 
   return { calculation, error: null, fallback };
+}
+
+export interface RunCalculationResult {
+  calculation: Record<string, unknown> | null;
+  error: { message: string } | null;
+  // Present even on error, so callers can build a fallback response (matches
+  // the shape calculation/index.ts returned before this was extracted).
+  fallback: {
+    mode: string;
+    temperature_c: number;
+    fan_speed: number;
+    power_kw: number;
+    btu_per_hr: number;
+    capacity_constrained: boolean;
+    comfort_preference: ComfortPreference;
+    people_count: number;
+    room_size: RoomSize;
+  };
 }
