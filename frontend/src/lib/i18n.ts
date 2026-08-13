@@ -165,6 +165,7 @@ const messages: Record<Locale, Messages> = {
     'simulation.appEnergyFootnote': 'App energy: {kwh} kWh overhead ({pct}% of savings)',
     'simulation.advancedDetails': 'Advanced details',
     'simulation.advancedDetailsSubtitle': 'V2 legacy comparison and full metric breakdown',
+    'simulation.pendingChanges': 'Settings changed — click Run to update results',
   },
   ko: {
     'nav.people': '인원',
@@ -312,6 +313,7 @@ const messages: Record<Locale, Messages> = {
     'simulation.appEnergyFootnote': '앱 에너지: {kwh} kWh 오버헤드 (절감량의 {pct}%)',
     'simulation.advancedDetails': '고급 세부정보',
     'simulation.advancedDetailsSubtitle': 'V2 레거시 비교 및 전체 지표',
+    'simulation.pendingChanges': '설정이 변경되었습니다 — 실행을 눌러 결과를 업데이트하세요',
   },
 };
 

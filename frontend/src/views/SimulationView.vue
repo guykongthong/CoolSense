@@ -134,6 +134,24 @@ const errorMessage = ref('');
 const summary = ref<SimulationSummary | null>(null);
 const hourlyData = ref<SimulationHourlyRow[]>([]);
 
+// What the currently-displayed results were actually run with — compared
+// against the live input refs below to flag "you changed a setting but
+// haven't re-run yet" instead of leaving the graph silently stale.
+const lastRunParams = ref({
+  durationHours: durationHours.value,
+  roomSize: roomSize.value,
+  weatherCondition: weatherCondition.value,
+  acSeer: acSeer.value,
+});
+
+const hasPendingChanges = computed(
+  () =>
+    durationHours.value !== lastRunParams.value.durationHours ||
+    roomSize.value !== lastRunParams.value.roomSize ||
+    weatherCondition.value !== lastRunParams.value.weatherCondition ||
+    acSeer.value !== lastRunParams.value.acSeer,
+);
+
 const chartSeries = computed(() => ({
   power: [
     { key: 'current_power_kw', color: CURRENT_COLOR, label: t('simulation.currentLegend') },
@@ -161,6 +179,12 @@ async function handleGenerateAndRun() {
     const result = await runSimulation(durationHours.value, roomSize.value, acSeer.value, weatherCondition.value);
     summary.value = result.summary;
     hourlyData.value = await getSimulationHourlyData(result.simulation_run_id);
+    lastRunParams.value = {
+      durationHours: durationHours.value,
+      roomSize: roomSize.value,
+      weatherCondition: weatherCondition.value,
+      acSeer: acSeer.value,
+    };
   } catch {
     errorMessage.value = t('simulation.errorFallback');
   } finally {
@@ -193,6 +217,109 @@ async function handleGenerateAndRun() {
     </aside>
 
     <div class="flex-1 min-w-0 flex flex-col gap-6">
+      <div class="sticky top-4 z-10">
+        <Card :title="t('simulation.comparisonSettings')">
+          <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+            <div class="flex flex-col gap-1.5">
+              <label
+                class="text-label-md text-on-surface-variant"
+                for="an_duration"
+              >{{ t('simulation.duration') }}</label>
+              <input
+                id="an_duration"
+                v-model.number="durationHours"
+                class="w-full border border-slate-300 rounded-lg px-3 py-2 text-body-md"
+                type="number"
+                min="1"
+              >
+            </div>
+            <div class="flex flex-col gap-1.5">
+              <label
+                class="text-label-md text-on-surface-variant"
+                for="an_room_size"
+              >{{ t('simulation.roomSize') }}</label>
+              <select
+                id="an_room_size"
+                v-model="roomSize"
+                class="w-full border border-slate-300 rounded-lg px-3 py-2 text-body-md bg-white"
+              >
+                <option value="small">
+                  {{ t('common.small') }}
+                </option>
+                <option value="medium">
+                  {{ t('common.medium') }}
+                </option>
+                <option value="large">
+                  {{ t('common.large') }}
+                </option>
+              </select>
+            </div>
+            <div class="flex flex-col gap-1.5">
+              <label
+                class="text-label-md text-on-surface-variant"
+                for="an_weather"
+              >{{ t('simulation.weather') }}</label>
+              <select
+                id="an_weather"
+                v-model="weatherCondition"
+                class="w-full border border-slate-300 rounded-lg px-3 py-2 text-body-md bg-white"
+              >
+                <option value="diurnal">
+                  {{ t('simulation.diurnal') }}
+                </option>
+                <option value="cool">
+                  {{ t('simulation.cool') }}
+                </option>
+                <option value="warm">
+                  {{ t('simulation.warm') }}
+                </option>
+                <option value="hot">
+                  {{ t('simulation.hot') }}
+                </option>
+              </select>
+            </div>
+            <div class="flex flex-col gap-1.5">
+              <label
+                class="text-label-md text-on-surface-variant"
+                for="an_seer"
+              >{{ t('simulation.acSeer') }}</label>
+              <input
+                id="an_seer"
+                v-model.number="acSeer"
+                class="w-full border border-slate-300 rounded-lg px-3 py-2 text-body-md"
+                type="number"
+                min="2"
+                max="6"
+                step="0.1"
+              >
+            </div>
+          </div>
+          <div class="flex items-center gap-3">
+            <button
+              type="button"
+              :disabled="running"
+              class="text-label-md rounded-lg px-4 py-2.5 transition-colors disabled:opacity-50"
+              :class="
+                hasPendingChanges
+                  ? 'bg-primary text-on-primary hover:opacity-90 animate-pulse'
+                  : 'border border-slate-300 text-on-surface hover:bg-surface-container-low'
+              "
+              @click="handleGenerateAndRun"
+            >
+              {{ running ? t('simulation.running') : t('simulation.runButton') }}
+            </button>
+            <span
+              v-if="hasPendingChanges && !running"
+              class="text-label-sm text-primary"
+            >{{ t('simulation.pendingChanges') }}</span>
+            <span
+              v-if="errorMessage"
+              class="text-label-sm text-error"
+            >{{ errorMessage }}</span>
+          </div>
+        </Card>
+      </div>
+
       <ComparisonSection
         v-if="summary"
         :summary="summary"
@@ -336,98 +463,6 @@ async function handleGenerateAndRun() {
           </table>
         </div>
       </details>
-
-      <Card :title="t('simulation.comparisonSettings')">
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
-          <div class="flex flex-col gap-1.5">
-            <label
-              class="text-label-md text-on-surface-variant"
-              for="an_duration"
-            >{{ t('simulation.duration') }}</label>
-            <input
-              id="an_duration"
-              v-model.number="durationHours"
-              class="w-full border border-slate-300 rounded-lg px-3 py-2 text-body-md"
-              type="number"
-              min="1"
-            >
-          </div>
-          <div class="flex flex-col gap-1.5">
-            <label
-              class="text-label-md text-on-surface-variant"
-              for="an_room_size"
-            >{{ t('simulation.roomSize') }}</label>
-            <select
-              id="an_room_size"
-              v-model="roomSize"
-              class="w-full border border-slate-300 rounded-lg px-3 py-2 text-body-md bg-white"
-            >
-              <option value="small">
-                {{ t('common.small') }}
-              </option>
-              <option value="medium">
-                {{ t('common.medium') }}
-              </option>
-              <option value="large">
-                {{ t('common.large') }}
-              </option>
-            </select>
-          </div>
-          <div class="flex flex-col gap-1.5">
-            <label
-              class="text-label-md text-on-surface-variant"
-              for="an_weather"
-            >{{ t('simulation.weather') }}</label>
-            <select
-              id="an_weather"
-              v-model="weatherCondition"
-              class="w-full border border-slate-300 rounded-lg px-3 py-2 text-body-md bg-white"
-            >
-              <option value="diurnal">
-                {{ t('simulation.diurnal') }}
-              </option>
-              <option value="cool">
-                {{ t('simulation.cool') }}
-              </option>
-              <option value="warm">
-                {{ t('simulation.warm') }}
-              </option>
-              <option value="hot">
-                {{ t('simulation.hot') }}
-              </option>
-            </select>
-          </div>
-          <div class="flex flex-col gap-1.5">
-            <label
-              class="text-label-md text-on-surface-variant"
-              for="an_seer"
-            >{{ t('simulation.acSeer') }}</label>
-            <input
-              id="an_seer"
-              v-model.number="acSeer"
-              class="w-full border border-slate-300 rounded-lg px-3 py-2 text-body-md"
-              type="number"
-              min="2"
-              max="6"
-              step="0.1"
-            >
-          </div>
-        </div>
-        <div class="flex items-center gap-3">
-          <button
-            type="button"
-            :disabled="running"
-            class="border border-slate-300 text-on-surface text-label-md rounded-lg px-4 py-2.5 hover:bg-surface-container-low transition-colors disabled:opacity-50"
-            @click="handleGenerateAndRun"
-          >
-            {{ running ? t('simulation.running') : t('simulation.runButton') }}
-          </button>
-          <span
-            v-if="errorMessage"
-            class="text-label-sm text-error"
-          >{{ errorMessage }}</span>
-        </div>
-      </Card>
     </div>
   </div>
 </template>
