@@ -149,6 +149,36 @@ Deno.test("runSimulation: CO2 and cost use the Thailand grid figures (0.5 kg/kWh
   assertEquals(summary.smart_cost_baht, summary.smart_energy_kwh * 5);
 });
 
+Deno.test("runSimulation: app_energy_kwh is the per-day baseline prorated over duration_hours plus the fixed per-run overhead", () => {
+  const { summary } = runSimulation(new Array(24).fill(20), "medium", 4.5, "warm");
+  // 0.1051 kWh/day / 24h * 24h + 0.00185 kWh overhead == 0.1051 + 0.00185
+  assertAlmostEquals(summary.app_energy_kwh, 0.1051 + 0.00185, 1e-9);
+});
+
+Deno.test("runSimulation: app_energy_kwh scales linearly with duration_hours", () => {
+  const short = runSimulation(new Array(24).fill(20), "medium", 4.5, "warm").summary;
+  const long = runSimulation(new Array(48).fill(20), "medium", 4.5, "warm").summary;
+  const expectedDelta = (0.1051 / 24) * 24; // one more day's baseline, same fixed overhead
+  assertAlmostEquals(long.app_energy_kwh - short.app_energy_kwh, expectedDelta, 1e-9);
+});
+
+Deno.test("runSimulation: empty input has zero app_energy_kwh (no run means no overhead)", () => {
+  const { summary } = runSimulation([], "medium", 4.5, "warm");
+  assertEquals(summary.app_energy_kwh, 0);
+  assertEquals(summary.net_energy_saved_kwh, 0);
+  assertEquals(summary.net_co2_saved_kg, 0);
+  assertEquals(summary.net_cost_saved_baht, 0);
+});
+
+Deno.test("runSimulation: net savings equal V3 energy saved minus app_energy_kwh, priced at the Thailand grid figures", () => {
+  const { summary } = runSimulation([0, 5, 20, 41, 3], "medium", 4.5, "warm");
+  const v3EnergySaved = summary.static_v3_energy_kwh - summary.coolsense_v3_energy_kwh;
+  const expectedNet = v3EnergySaved - summary.app_energy_kwh;
+  assertAlmostEquals(summary.net_energy_saved_kwh, expectedNet, 1e-9);
+  assertAlmostEquals(summary.net_co2_saved_kg, expectedNet * 0.5, 1e-9);
+  assertAlmostEquals(summary.net_cost_saved_baht, expectedNet * 5, 1e-9);
+});
+
 Deno.test("runSimulation: pct_reduction is positive whenever the smart system uses less energy", () => {
   const { summary } = runSimulation([0, 1, 2, 0, 1], "medium", 4.5, "warm");
   assertEquals(summary.smart_energy_kwh < summary.current_energy_kwh, true);
