@@ -442,7 +442,7 @@ const fieldWrapClass =
         </form>
       </section>
 
-      <div class="flex justify-end">
+      <div class="flex flex-col items-end gap-1">
         <button
           type="button"
           class="border border-dashed border-primary text-primary text-label-md px-6 py-2.5 rounded-lg hover:bg-secondary-fixed transition-colors flex items-center gap-2"
@@ -451,6 +451,7 @@ const fieldWrapClass =
           <span class="material-symbols-outlined text-sm">add</span>
           {{ t('information.addDevice') }}
         </button>
+        <span class="text-label-sm text-on-surface-variant">{{ t('information.addDeviceOutOfScope') }}</span>
       </div>
     </div>
   </div>

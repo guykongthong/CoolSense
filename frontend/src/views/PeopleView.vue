@@ -109,22 +109,13 @@ const activityRange = ref<'12h' | '24h'>('24h');
       icon="group"
     />
 
-    <div class="bg-white rounded-xl border border-slate-200 shadow-[0_4px_20px_rgba(6,78,59,0.05)] p-6 flex flex-col justify-between h-48">
-      <div class="flex justify-between items-start mb-4">
-        <h3 class="text-label-md text-on-surface-variant">
-          {{ t('people.peakOccupancyToday') }}
-        </h3>
-        <span class="material-symbols-outlined text-outline">show_chart</span>
-      </div>
-      <div>
-        <div class="text-headline-lg text-on-surface">
-          {{ peakOccupancyDisplay }}
-        </div>
-        <p class="text-label-sm text-outline mt-1">
-          {{ peakAtDisplay }}
-        </p>
-      </div>
-    </div>
+    <StatCard
+      :label="t('people.peakOccupancyToday')"
+      :value="peakOccupancyDisplay"
+      icon="show_chart"
+    >
+      <span class="text-label-sm text-outline">{{ peakAtDisplay }}</span>
+    </StatCard>
 
     <StatCard
       :label="t('people.acSetting')"
