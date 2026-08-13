@@ -48,9 +48,10 @@ const chartSeries = computed(() => [
   { key: 'value', color: TAB_CONFIG[activeTab.value].color, label: t('analytics.legendRecorded') },
 ]);
 
-function formatLabel(row: Record<string, number>): string {
-  if (dateRange.value === 'today') return `${row.bucket}:00`;
-  const date = new Date(rangeStart(dateRange.value).getTime() + row.bucket * 24 * 60 * 60 * 1000);
+function formatLabel(row: Record<string, unknown>): string {
+  const bucket = Number(row.bucket);
+  if (dateRange.value === 'today') return `${bucket}:00`;
+  const date = new Date(rangeStart(dateRange.value).getTime() + bucket * 24 * 60 * 60 * 1000);
   return `${date.getMonth() + 1}/${date.getDate()}`;
 }
 

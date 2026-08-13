@@ -138,10 +138,13 @@ export interface SimulationListItem {
   created_at: string;
 }
 
-async function invoke<T>(path: string, options: { method?: string; body?: unknown } = {}): Promise<T> {
+async function invoke<T>(
+  path: string,
+  options: { method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'; body?: object } = {},
+): Promise<T> {
   const { data, error } = await supabase.functions.invoke<T>(path, {
     method: options.method ?? 'POST',
-    body: options.body,
+    body: options.body as Record<string, unknown> | undefined,
   });
   if (error) throw error;
   return data as T;
