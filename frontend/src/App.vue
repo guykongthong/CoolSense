@@ -13,7 +13,6 @@ const NAV_ITEMS = computed<NavItem[]>(() => [
   { id: 'information', label: t('nav.information'), icon: 'info' },
   { id: 'analytics', label: t('nav.analytics'), icon: 'analytics' },
   { id: 'simulation', label: t('nav.simulation'), icon: 'science' },
-  { id: 'devices', label: t('nav.devices'), icon: 'sensors' },
 ]);
 
 const PAGE_COPY = computed<Record<string, { title: string; subtitle: string }>>(() => ({
@@ -21,7 +20,6 @@ const PAGE_COPY = computed<Record<string, { title: string; subtitle: string }>>(
   information: { title: t('page.information.title'), subtitle: t('page.information.subtitle') },
   analytics: { title: t('page.analytics.title'), subtitle: t('page.analytics.subtitle') },
   simulation: { title: t('page.simulation.title'), subtitle: t('page.simulation.subtitle') },
-  devices: { title: t('page.devices.title'), subtitle: t('page.devices.subtitle') },
 }));
 
 const active = ref('people');

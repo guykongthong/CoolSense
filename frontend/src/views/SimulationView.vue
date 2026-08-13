@@ -15,11 +15,11 @@ import {
   type SimulationSummary,
   type WeatherCondition,
 } from '../lib/api';
+import { withProgress } from '../lib/progress';
 
 const selectedRoom = ref<RoomId>(ROOM_IDS[0]);
 
 const CURRENT_COLOR = '#2a78d6';
-const SMART_COLOR = '#eb6834';
 const SMART_V3_COLOR = '#d68f2a';
 const CO2_PER_KWH = 0.5;
 const COST_PER_KWH_BAHT = 5;
@@ -152,16 +152,19 @@ const hasPendingChanges = computed(
     acSeer.value !== lastRunParams.value.acSeer,
 );
 
+// Only static-v3 (the size/weather-aware baseline) vs CoolSense V3 —
+// CoolSense V1/V2 were dropped from these graphs once V3 became the only
+// live model (see CLAUDE.md's CoolSense V3 section); showing three models
+// when only one is ever actually deployed just clutters the chart with
+// history no one's asking to compare against anymore.
 const chartSeries = computed(() => ({
   power: [
-    { key: 'current_power_kw', color: CURRENT_COLOR, label: t('simulation.currentLegend') },
-    { key: 'smart_power_kw', color: SMART_COLOR, label: t('simulation.smartLegend') },
-    { key: 'coolsense_v3_power_kw', color: SMART_V3_COLOR, label: t('simulation.smartV3Legend') },
+    { key: 'static_v3_power_kw', color: CURRENT_COLOR, label: t('simulation.staticBaseline') },
+    { key: 'coolsense_v3_power_kw', color: SMART_V3_COLOR, label: t('simulation.smartSystem') },
   ],
   energy: [
-    { key: 'current_cumulative_kwh', color: CURRENT_COLOR, label: t('simulation.currentLegend') },
-    { key: 'smart_cumulative_kwh', color: SMART_COLOR, label: t('simulation.smartLegend') },
-    { key: 'coolsense_v3_cumulative_kwh', color: SMART_V3_COLOR, label: t('simulation.smartV3Legend') },
+    { key: 'static_v3_cumulative_kwh', color: CURRENT_COLOR, label: t('simulation.staticBaseline') },
+    { key: 'coolsense_v3_cumulative_kwh', color: SMART_V3_COLOR, label: t('simulation.smartSystem') },
   ],
 }));
 
@@ -175,10 +178,12 @@ async function handleGenerateAndRun() {
   running.value = true;
   errorMessage.value = '';
   try {
-    await generateMockData(durationHours.value, roomSize.value);
-    const result = await runSimulation(durationHours.value, roomSize.value, acSeer.value, weatherCondition.value);
-    summary.value = result.summary;
-    hourlyData.value = await getSimulationHourlyData(result.simulation_run_id);
+    await withProgress(async () => {
+      await generateMockData(durationHours.value, roomSize.value);
+      const result = await runSimulation(durationHours.value, roomSize.value, acSeer.value, weatherCondition.value);
+      summary.value = result.summary;
+      hourlyData.value = await getSimulationHourlyData(result.simulation_run_id);
+    });
     lastRunParams.value = {
       durationHours: durationHours.value,
       roomSize: roomSize.value,
@@ -351,37 +356,7 @@ async function handleGenerateAndRun() {
         <p class="text-label-sm text-on-surface-variant mt-2 mb-4">
           {{ t('simulation.advancedDetailsSubtitle') }}
         </p>
-        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-          <StatCard
-            :label="t('simulation.currentEnergy')"
-            :value="`${summary.current_energy_kwh.toFixed(0)} kWh`"
-            value-size="headline"
-          />
-          <StatCard
-            :label="t('simulation.smartEnergy')"
-            :value="`${summary.smart_energy_kwh.toFixed(1)} kWh`"
-            value-size="headline"
-          />
-          <StatCard
-            :label="t('simulation.energySaved')"
-            :value="`${(summary.current_energy_kwh - summary.smart_energy_kwh).toFixed(1)} kWh`"
-            value-size="headline"
-          />
-          <StatCard
-            :label="t('simulation.pctReduction')"
-            :value="`${summary.pct_reduction.toFixed(1)}%`"
-            value-size="headline"
-          />
-          <StatCard
-            :label="t('simulation.co2Saved')"
-            :value="`${(summary.current_co2_kg - summary.smart_co2_kg).toFixed(1)} kg`"
-            value-size="headline"
-          />
-          <StatCard
-            :label="t('simulation.costSaved')"
-            :value="`${(summary.current_cost_baht - summary.smart_cost_baht).toFixed(1)} baht`"
-            value-size="headline"
-          />
+        <div class="grid grid-cols-2 sm:grid-cols-3 gap-4">
           <StatCard
             :label="t('simulation.v3Energy')"
             :value="`${summary.coolsense_v3_energy_kwh.toFixed(1)} kWh`"
@@ -412,19 +387,13 @@ async function handleGenerateAndRun() {
                   {{ t('simulation.hour') }}
                 </th>
                 <th class="py-2 pr-4">
-                  {{ t('simulation.currentKw') }}
-                </th>
-                <th class="py-2 pr-4">
-                  {{ t('simulation.smartKw') }}
+                  {{ t('simulation.staticV3Kw') }}
                 </th>
                 <th class="py-2 pr-4">
                   {{ t('simulation.smartV3Kw') }}
                 </th>
                 <th class="py-2 pr-4">
-                  {{ t('simulation.currentCumKwh') }}
-                </th>
-                <th class="py-2 pr-4">
-                  {{ t('simulation.smartCumKwh') }}
+                  {{ t('simulation.staticV3CumKwh') }}
                 </th>
                 <th class="py-2 pr-4">
                   {{ t('simulation.smartV3CumKwh') }}
@@ -441,19 +410,13 @@ async function handleGenerateAndRun() {
                   {{ row.hour_index }}h
                 </td>
                 <td class="py-1.5 pr-4">
-                  {{ row.current_power_kw.toFixed(2) }}
-                </td>
-                <td class="py-1.5 pr-4">
-                  {{ row.smart_power_kw.toFixed(2) }}
+                  {{ row.static_v3_power_kw.toFixed(2) }}
                 </td>
                 <td class="py-1.5 pr-4">
                   {{ row.coolsense_v3_power_kw.toFixed(2) }}
                 </td>
                 <td class="py-1.5 pr-4">
-                  {{ row.current_cumulative_kwh.toFixed(1) }}
-                </td>
-                <td class="py-1.5 pr-4">
-                  {{ row.smart_cumulative_kwh.toFixed(1) }}
+                  {{ row.static_v3_cumulative_kwh.toFixed(1) }}
                 </td>
                 <td class="py-1.5 pr-4">
                   {{ row.coolsense_v3_cumulative_kwh.toFixed(1) }}

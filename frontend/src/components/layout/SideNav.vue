@@ -48,20 +48,5 @@ defineEmits<{
       }}</span>
       <span class="text-label-md">{{ item.label }}</span>
     </a>
-
-    <a
-      href="#"
-      class="flex items-center gap-3 text-on-surface-variant px-4 py-3 hover:bg-surface-container-high transition-colors mt-auto"
-      @click.prevent
-    >
-      <span class="material-symbols-outlined">settings</span>
-      <span class="text-label-md">{{ t('nav.settings') }}</span>
-    </a>
-    <button
-      type="button"
-      class="bg-primary text-on-primary text-label-md py-3 px-4 rounded-lg hover:bg-primary-container transition-colors w-full"
-    >
-      {{ t('nav.addDevice') }}
-    </button>
   </nav>
 </template>
