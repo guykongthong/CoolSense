@@ -218,9 +218,10 @@ export function listSimulations(): Promise<SimulationListItem[]> {
   return invoke('simulation/list', { method: 'GET' });
 }
 
-// ---- Analytics history (direct table reads — occupancy_readings,
-// ac_calculations currently have RLS disabled, same pre-existing gap noted
-// elsewhere; no dedicated history endpoint exists yet, see CLAUDE.md) ----
+// ---- Analytics history (direct table reads against occupancy_readings/
+// ac_calculations — anon has SELECT-only RLS policies on both, see
+// 20260813100000_enable_rls_with_read_policies.sql; no dedicated history
+// endpoint exists yet, see CLAUDE.md) ----
 
 export type DateRange = 'today' | '7d' | '30d';
 
@@ -228,6 +229,12 @@ export interface HistoryPoint {
   bucket: number;
   value: number;
 }
+
+// "Today" buckets by 15-minute slice instead of by hour — camera readings
+// arrive every ~5s, so hourly buckets flattened out almost all of that
+// detail into a near-static line. 96 buckets/day is still smooth to read
+// but shows real movement within an hour.
+export const TODAY_BUCKET_MINUTES = 15;
 
 export function rangeStart(range: DateRange): Date {
   const now = new Date();
@@ -243,12 +250,12 @@ export function rangeStart(range: DateRange): Date {
 }
 
 function bucketCountFor(range: DateRange): number {
-  return range === 'today' ? 24 : range === '7d' ? 7 : 30;
+  return range === 'today' ? (24 * 60) / TODAY_BUCKET_MINUTES : range === '7d' ? 7 : 30;
 }
 
 function bucketIndexFor(timestamp: string, range: DateRange, start: Date): number {
   const ts = new Date(timestamp);
-  if (range === 'today') return ts.getHours();
+  if (range === 'today') return Math.floor((ts.getHours() * 60 + ts.getMinutes()) / TODAY_BUCKET_MINUTES);
   return Math.floor((ts.getTime() - start.getTime()) / (24 * 60 * 60 * 1000));
 }
 

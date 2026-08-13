@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import Card from '../components/ui/Card.vue';
 import LineAreaChart from '../components/ui/LineAreaChart.vue';
 import { t } from '../lib/i18n';
@@ -10,6 +10,7 @@ import {
   getTemperatureHistory,
   type HistoryPoint,
   rangeStart,
+  TODAY_BUCKET_MINUTES,
 } from '../lib/api';
 
 type Tab = 'people' | 'electric' | 'temperature';
@@ -44,13 +45,33 @@ async function load() {
 
 watch([activeTab, dateRange], load, { immediate: true });
 
+// These are aggregated/bucketed queries, not a single row — Realtime's
+// postgres_changes can't target "re-run this aggregation," so a light
+// poll is the practical way to keep the chart current as new readings
+// (camera detections, /calculation runs) come in while the page is open.
+const REFRESH_INTERVAL_MS = 30_000;
+let refreshInterval: ReturnType<typeof setInterval> | null = null;
+
+onMounted(() => {
+  refreshInterval = setInterval(load, REFRESH_INTERVAL_MS);
+});
+
+onUnmounted(() => {
+  if (refreshInterval !== null) clearInterval(refreshInterval);
+});
+
 const chartSeries = computed(() => [
   { key: 'value', color: TAB_CONFIG[activeTab.value].color, label: t('analytics.legendRecorded') },
 ]);
 
 function formatLabel(row: Record<string, unknown>): string {
   const bucket = Number(row.bucket);
-  if (dateRange.value === 'today') return `${bucket}:00`;
+  if (dateRange.value === 'today') {
+    const totalMinutes = bucket * TODAY_BUCKET_MINUTES;
+    const hour = Math.floor(totalMinutes / 60);
+    const minute = totalMinutes % 60;
+    return `${hour}:${String(minute).padStart(2, '0')}`;
+  }
   const date = new Date(rangeStart(dateRange.value).getTime() + bucket * 24 * 60 * 60 * 1000);
   return `${date.getMonth() + 1}/${date.getDate()}`;
 }

@@ -68,6 +68,17 @@ const loadError = ref(false);
 const saveError = ref(false);
 const saveSuccess = ref(false);
 
+const ROOM_SIZE_LABEL_KEY: Record<'s' | 'm' | 'l', string> = { s: 'common.small', m: 'common.medium', l: 'common.large' };
+const primaryDevice = computed(() => devices.value[0]);
+const savedRoomSizeLabel = computed(() => t(ROOM_SIZE_LABEL_KEY[primaryDevice.value.roomSize]));
+const savedSeerLabel = computed(() => primaryDevice.value.seerValue || '—');
+const savedCapacityLabel = computed(() =>
+  primaryDevice.value.coolingCapacity ? `${primaryDevice.value.coolingCapacity} BTU/h` : '—',
+);
+const savedEgatLabel = computed(() =>
+  isThailand.value && primaryDevice.value.starRating ? t('information.stars', { n: primaryDevice.value.starRating }) : '—',
+);
+
 onMounted(async () => {
   try {
     const config = await getRoomConfig();
@@ -162,6 +173,35 @@ const fieldWrapClass =
               </p>
             </div>
           </div>
+
+          <dl class="mt-4 grid grid-cols-2 gap-x-4 gap-y-2 text-label-sm">
+            <dt class="text-on-surface-variant">
+              {{ t('information.roomSize') }}
+            </dt>
+            <dd class="text-on-surface text-right">
+              {{ savedRoomSizeLabel }}
+            </dd>
+            <dt class="text-on-surface-variant">
+              {{ t('information.seerValue') }}
+            </dt>
+            <dd class="text-on-surface text-right">
+              {{ savedSeerLabel }}
+            </dd>
+            <dt class="text-on-surface-variant">
+              {{ t('information.coolingCapacity') }}
+            </dt>
+            <dd class="text-on-surface text-right">
+              {{ savedCapacityLabel }}
+            </dd>
+            <template v-if="isThailand">
+              <dt class="text-on-surface-variant">
+                {{ t('information.energyLabel') }}
+              </dt>
+              <dd class="text-on-surface text-right">
+                {{ savedEgatLabel }}
+              </dd>
+            </template>
+          </dl>
         </div>
       </section>
     </div>
