@@ -12,6 +12,7 @@ import {
   rangeStart,
   TODAY_BUCKET_MINUTES,
 } from '../lib/api';
+import { withProgress } from '../lib/progress';
 
 type Tab = 'people' | 'electric' | 'temperature';
 
@@ -30,11 +31,12 @@ const points = ref<HistoryPoint[]>([]);
 const loading = ref(false);
 const errorMessage = ref('');
 
-async function load() {
+async function load(showProgress = true) {
   loading.value = true;
   errorMessage.value = '';
+  const fetchPoints = () => TAB_CONFIG[activeTab.value].fetcher(dateRange.value);
   try {
-    points.value = await TAB_CONFIG[activeTab.value].fetcher(dateRange.value);
+    points.value = showProgress ? await withProgress(fetchPoints) : await fetchPoints();
   } catch {
     errorMessage.value = t('analytics.errorFallback');
     points.value = [];
@@ -43,17 +45,19 @@ async function load() {
   }
 }
 
-watch([activeTab, dateRange], load, { immediate: true });
+watch([activeTab, dateRange], () => load(), { immediate: true });
 
 // These are aggregated/bucketed queries, not a single row — Realtime's
 // postgres_changes can't target "re-run this aggregation," so a light
 // poll is the practical way to keep the chart current as new readings
 // (camera detections, /calculation runs) come in while the page is open.
+// Runs silently (showProgress=false) — a top-bar flash every 30s while the
+// page just sits open would be noisy, not informative.
 const REFRESH_INTERVAL_MS = 30_000;
 let refreshInterval: ReturnType<typeof setInterval> | null = null;
 
 onMounted(() => {
-  refreshInterval = setInterval(load, REFRESH_INTERVAL_MS);
+  refreshInterval = setInterval(() => load(false), REFRESH_INTERVAL_MS);
 });
 
 onUnmounted(() => {

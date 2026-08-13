@@ -100,3 +100,12 @@ body {
   margin: 0;
   font-family: var(--font-sans);
 }
+
+/* NProgress bar recolored to match the app's primary color; peg/spinner disabled via configure({ showSpinner: false }) in lib/progress.ts. */
+#nprogress .bar {
+  background: var(--color-primary) !important;
+}
+
+#nprogress .peg {
+  box-shadow: 0 0 10px var(--color-primary), 0 0 5px var(--color-primary) !important;
+}

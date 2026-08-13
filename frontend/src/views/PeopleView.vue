@@ -5,11 +5,20 @@ import StatCard from '../components/ui/StatCard.vue';
 import { useAcCalculation } from '../composables/useAcCalculation';
 import { useCameraOccupancy } from '../composables/useCameraOccupancy';
 import { useOccupancy } from '../composables/useOccupancy';
+import { usePeakOccupancy } from '../composables/usePeakOccupancy';
 import { t } from '../lib/i18n';
 
 const { videoRef, isMonitoring, isAnalyzing, latestCount, error, start, stop } = useCameraOccupancy();
 const { latestReading } = useOccupancy();
 const { latestCalculation } = useAcCalculation();
+const { peak } = usePeakOccupancy();
+
+const peakOccupancyDisplay = computed(() => (peak.value ? peak.value.people_count.toLocaleString() : '—'));
+const peakAtDisplay = computed(() => {
+  if (!peak.value?.captured_at) return t('people.peakAtNone');
+  const time = new Date(peak.value.captured_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  return t('people.peakAt', { time });
+});
 
 const acTempDisplay = computed(() => (latestCalculation.value ? `${latestCalculation.value.temperature_c}°C` : '—'));
 const acModeDisplay = computed(() => (latestCalculation.value ? t(`people.acMode.${latestCalculation.value.ac_mode}`) : ''));
@@ -109,17 +118,11 @@ const activityRange = ref<'12h' | '24h'>('24h');
       </div>
       <div>
         <div class="text-headline-lg text-on-surface">
-          1,450
+          {{ peakOccupancyDisplay }}
         </div>
         <p class="text-label-sm text-outline mt-1">
-          {{ t('people.peakAt') }}
+          {{ peakAtDisplay }}
         </p>
-      </div>
-      <div class="w-full bg-surface-container h-2 rounded-full mt-4 overflow-hidden">
-        <div
-          class="h-full rounded-full bg-gradient-to-r from-[#10B981] to-primary-container"
-          style="width: 85%"
-        />
       </div>
     </div>
 

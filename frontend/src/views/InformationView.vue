@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { getRoomConfig, ROOM_SIZE_SQM_RANGES, type RoomSize, updateRoomConfig } from '../lib/api';
 import { t } from '../lib/i18n';
+import { withProgress } from '../lib/progress';
 import { ROOM_IDS, type RoomId } from '../lib/rooms';
 
 // Static UI matching the design comp for now — same approach as the People
@@ -94,7 +95,7 @@ const savedEgatLabel = computed(() =>
 
 onMounted(async () => {
   try {
-    const config = await getRoomConfig();
+    const config = await withProgress(getRoomConfig);
     roomLocation.value = config.location;
     const primary = devices.value[0];
     primary.roomSize = ROOM_SIZE_TO_LETTER[config.room_size];
@@ -144,12 +145,14 @@ async function saveDevice(idx: number) {
 
   saving.value = true;
   try {
-    await updateRoomConfig({
-      room_size: LETTER_TO_ROOM_SIZE[device.roomSize],
-      ac_seer: seer,
-      egat_label: isThailand.value && device.starRating ? (device.starRating as '3' | '4' | '5') : null,
-      rated_capacity_btu_per_hr: device.coolingCapacity ? Number(device.coolingCapacity) : null,
-    });
+    await withProgress(() =>
+      updateRoomConfig({
+        room_size: LETTER_TO_ROOM_SIZE[device.roomSize],
+        ac_seer: seer,
+        egat_label: isThailand.value && device.starRating ? (device.starRating as '3' | '4' | '5') : null,
+        rated_capacity_btu_per_hr: device.coolingCapacity ? Number(device.coolingCapacity) : null,
+      }),
+    );
     saveSuccess.value = true;
   } catch (e) {
     saveError.value = true;

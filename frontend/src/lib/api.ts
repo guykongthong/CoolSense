@@ -171,6 +171,15 @@ export function getOccupancy(): Promise<OccupancyReading> {
   return invoke('occupancy', { method: 'GET' });
 }
 
+export interface OccupancyPeak {
+  people_count: number;
+  captured_at: string | null;
+}
+
+export function getPeakOccupancyToday(): Promise<OccupancyPeak> {
+  return invoke('occupancy/peak-today', { method: 'GET' });
+}
+
 export function postOccupancyReading(peopleCount: number, source = 'manual'): Promise<OccupancyReading> {
   return invoke('occupancy-readings', { method: 'POST', body: { people_count: peopleCount, source } });
 }

@@ -1,5 +1,6 @@
 import { onMounted, onUnmounted, ref } from 'vue';
 import { supabase } from '../lib/supabaseClient';
+import { withProgress } from '../lib/progress';
 
 // TODO: ML JSON shape — columns will change once the teammate's
 // Google Cloud service output format is known.
@@ -14,12 +15,14 @@ export function useOccupancy() {
   const latestReading = ref<OccupancyReading | null>(null);
 
   onMounted(async () => {
-    const { data } = await supabase
-      .from('occupancy_readings')
-      .select('*')
-      .order('captured_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const { data } = await withProgress(() =>
+      supabase
+        .from('occupancy_readings')
+        .select('*')
+        .order('captured_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    );
 
     latestReading.value = data as OccupancyReading | null;
 

@@ -1,5 +1,6 @@
 import { onMounted, onUnmounted, ref } from 'vue';
 import { supabase } from '../lib/supabaseClient';
+import { withProgress } from '../lib/progress';
 import type { AcMode } from '../lib/api';
 
 interface AcCalculationReading {
@@ -17,12 +18,14 @@ export function useAcCalculation() {
   const latestCalculation = ref<AcCalculationReading | null>(null);
 
   onMounted(async () => {
-    const { data } = await supabase
-      .from('ac_calculations')
-      .select('id, temperature_c, ac_mode, capacity_constrained, calculated_at')
-      .order('calculated_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const { data } = await withProgress(() =>
+      supabase
+        .from('ac_calculations')
+        .select('id, temperature_c, ac_mode, capacity_constrained, calculated_at')
+        .order('calculated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    );
 
     latestCalculation.value = data as AcCalculationReading | null;
 
