@@ -305,6 +305,20 @@ Deno.test("runSimulation: CoolSense V3 (neutral comfort) never exceeds the stati
   assertEquals(hourly[0].coolsense_v3_power_kw <= hourly[0].static_v3_power_kw, true);
 });
 
+Deno.test("runSimulation: CoolSense V3 never exceeds the static-v3 baseline at full occupancy under hot weather", () => {
+  // small room, full-mode implied occupancy = ceil(0.15*100) = 15 people.
+  // "hot" (38C/75%) sits well above the 33C/60% baseline the static
+  // sizing must also account for, not just baseline-weather worst-case.
+  const { hourly } = runSimulation([15], "small", 15, "hot", undefined, DEFAULT_STATIC_TEMP_C, "neutral");
+  assertEquals(hourly[0].coolsense_v3_power_kw <= hourly[0].static_v3_power_kw, true);
+});
+
+Deno.test("runSimulation: CoolSense V3 never exceeds the static-v3 baseline at full occupancy under diurnal peak weather", () => {
+  const peakHour = new Date(2026, 7, 10, 15, 0, 0); // 3pm, diurnal peak (36C/80%)
+  const { hourly } = runSimulation([15], "small", 15, "diurnal", [peakHour], DEFAULT_STATIC_TEMP_C, "neutral");
+  assertEquals(hourly[0].coolsense_v3_power_kw <= hourly[0].static_v3_power_kw, true);
+});
+
 Deno.test("runSimulation: static_v3 and coolsense_v3 cumulative sums are monotonic and match the summary totals at the last hour", () => {
   const { hourly, summary } = runSimulation([0, 5, 10, 20, 3], "medium", 15, "hot");
   for (let i = 1; i < hourly.length; i++) {

@@ -259,32 +259,47 @@ function bucketIndexFor(timestamp: string, range: DateRange, start: Date): numbe
   return Math.floor((ts.getTime() - start.getTime()) / (24 * 60 * 60 * 1000));
 }
 
-// Averages raw (timestamp, value) rows into evenly-spaced buckets — one per
-// hour-of-day for "today", one per calendar day for "7d"/"30d" — so the
+// Aggregates raw (timestamp, value) rows into evenly-spaced buckets — one
+// per hour-of-day for "today", one per calendar day for "7d"/"30d" — so the
 // chart's x-axis stays evenly spaced regardless of how sparse or dense the
 // underlying readings are (there's no automatic polling yet, only
 // on-demand writes — see CLAUDE.md). Buckets with no readings default to 0
 // rather than a fabricated/interpolated value.
-function bucketize(rows: { timestamp: string; value: number }[], range: DateRange): HistoryPoint[] {
+//
+// `aggregate` defaults to 'avg' (right for continuous quantities like power/
+// temperature). People-count uses 'max': camera readings arrive every ~5s
+// and a room's occupancy can spike briefly (e.g. 30+ people) then drop back
+// to 0 between detections within the same 15-minute bucket — averaging that
+// window flattens a real 30-person spike down to single digits, which reads
+// as the y-axis being "capped" when it's actually the aggregation hiding
+// the peak. Peak-per-bucket is also the more useful number for an occupancy
+// chart anyway (what's the most people this room had, not the mean).
+function bucketize(
+  rows: { timestamp: string; value: number }[],
+  range: DateRange,
+  aggregate: 'avg' | 'max' = 'avg',
+): HistoryPoint[] {
   const start = rangeStart(range);
   const count = bucketCountFor(range);
-  const sums = new Map<number, { sum: number; n: number }>();
+  const buckets = new Map<number, { sum: number; n: number; max: number }>();
 
   for (const row of rows) {
     const idx = bucketIndexFor(row.timestamp, range, start);
     if (idx < 0 || idx >= count) continue;
-    const existing = sums.get(idx);
+    const existing = buckets.get(idx);
     if (existing) {
       existing.sum += row.value;
       existing.n += 1;
+      existing.max = Math.max(existing.max, row.value);
     } else {
-      sums.set(idx, { sum: row.value, n: 1 });
+      buckets.set(idx, { sum: row.value, n: 1, max: row.value });
     }
   }
 
   return Array.from({ length: count }, (_, i) => {
-    const bucket = sums.get(i);
-    return { bucket: i, value: bucket ? bucket.sum / bucket.n : 0 };
+    const bucket = buckets.get(i);
+    if (!bucket) return { bucket: i, value: 0 };
+    return { bucket: i, value: aggregate === 'max' ? bucket.max : bucket.sum / bucket.n };
   });
 }
 
@@ -300,7 +315,7 @@ export async function getPeopleHistory(range: DateRange): Promise<HistoryPoint[]
     timestamp: r.captured_at,
     value: r.people_count,
   }));
-  return bucketize(rows, range);
+  return bucketize(rows, range, 'max');
 }
 
 export async function getElectricHistory(range: DateRange): Promise<HistoryPoint[]> {

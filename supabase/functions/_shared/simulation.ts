@@ -73,18 +73,39 @@ function staticSystemPowerKw(staticTempC: number): number {
   return CURRENT_SYSTEM_POWER_KW * multiplier;
 }
 
+// Worst-case outdoor conditions for a given weather_condition, used to size
+// the static-v3 baseline's capacity. For the flat presets this is just the
+// preset itself; for "diurnal" it's the cycle's peak (3pm: 36C/80%), since
+// that's the hottest/most humid point the naive system has to survive.
+function worstCaseWeatherFor(weatherCondition: WeatherCondition): { tempC: number; humidityPct: number } {
+  if (weatherCondition === "diurnal") {
+    return {
+      tempC: DIURNAL_MID_TEMP_C + DIURNAL_TEMP_AMPLITUDE_C,
+      humidityPct: DIURNAL_MID_HUMIDITY_PCT + DIURNAL_HUMIDITY_AMPLITUDE_PCT,
+    };
+  }
+  return WEATHER_CONDITION_PRESETS[weatherCondition];
+}
+
 // The static-v3 baseline for the CoolSense V3 comparison: sized for the
-// room's full-mode occupancy (never under-capacity for real peak load), and
-// never backs off below what that peak load requires — a naive system
-// doesn't adapt to actual occupancy, so its effective setpoint can't be
-// milder than what full occupancy already demands. `staticTempC` can still
-// push it COLDER than full mode's own base temp (an explicitly configured
+// room's full-mode occupancy AND the run's worst-case weather load (never
+// under-capacity for real peak load), and never backs off below what that
+// peak load requires — a naive system doesn't adapt to actual occupancy or
+// weather, so its effective setpoint can't be milder than what full
+// occupancy under worst-case weather already demands. Sizing this against
+// the baseline weather (multiplier=1) regardless of the run's actual
+// weather_condition previously let CoolSense V3's real per-hour weather
+// multiplier exceed this frozen capacity under "hot"/"diurnal" peak
+// conditions — see simulation.test.ts "never exceeds the static-v3 baseline
+// ... under hot/diurnal peak weather". `staticTempC` can still push it
+// COLDER than full mode's own base temp (an explicitly configured
 // aggressive baseline), which raises power further; it just can't make the
 // baseline complacently warmer than what peak crowding needs. Reuses the
 // same 5%/°C scaling rate and floor as staticSystemPowerKw, for consistency.
-function staticV3PowerKw(roomSize: RoomSize, seer: number, staticTempC: number): number {
+function staticV3PowerKw(roomSize: RoomSize, seer: number, staticTempC: number, weatherCondition: WeatherCondition): number {
   const fullOccupancyPeople = Math.ceil(FULL_DENSITY * ROOM_SIZE_SQM[roomSize]);
-  const worstCase = calculateAcSettingsV3(fullOccupancyPeople, roomSize, seer);
+  const worstWeather = worstCaseWeatherFor(weatherCondition);
+  const worstCase = calculateAcSettingsV3(fullOccupancyPeople, roomSize, seer, worstWeather.tempC, worstWeather.humidityPct);
   const effectiveStaticTempC = Math.min(staticTempC, worstCase.temperature_c);
   const degreesColderThanFullModeBase = worstCase.temperature_c - effectiveStaticTempC;
   const multiplier = Math.max(
@@ -253,7 +274,7 @@ export function runSimulation(
 ): { hourly: SimulationHourResult[]; summary: SimulationSummary } {
   const hourly: SimulationHourResult[] = [];
   const staticPowerKw = staticSystemPowerKw(staticTempC);
-  const staticV3Kw = staticV3PowerKw(roomSize, seer, staticTempC);
+  const staticV3Kw = staticV3PowerKw(roomSize, seer, staticTempC, weatherCondition);
 
   let currentCumulativeKwh = 0;
   let smartCumulativeKwh = 0;
