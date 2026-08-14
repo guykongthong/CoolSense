@@ -136,6 +136,8 @@ export interface SimulationHourlyRow {
   coolsense_v3_cumulative_kwh: number;
   static_v3_cumulative_co2: number;
   coolsense_v3_cumulative_co2: number;
+  static_v3_temperature_c: number;
+  coolsense_v3_temperature_c: number;
 }
 
 export interface SimulationListItem {
@@ -205,15 +207,27 @@ export function generateMockData(durationHours: number, roomSize: RoomSize): Pro
   return invoke('simulation/generate-mock-data', { method: 'POST', body: { duration_hours: durationHours, room_size: roomSize } });
 }
 
+export interface OperatingHoursSchedule {
+  startHour: number;
+  endHour: number;
+}
+
 export function runSimulation(
   durationHours: number,
   roomSize: RoomSize,
   acSeer: number,
   weatherCondition: WeatherCondition,
+  schedule?: OperatingHoursSchedule,
 ): Promise<SimulationRunResult> {
   return invoke('simulation/run', {
     method: 'POST',
-    body: { duration_hours: durationHours, room_size: roomSize, ac_seer: acSeer, weather_condition: weatherCondition },
+    body: {
+      duration_hours: durationHours,
+      room_size: roomSize,
+      ac_seer: acSeer,
+      weather_condition: weatherCondition,
+      ...(schedule ? { schedule_start_hour: schedule.startHour, schedule_end_hour: schedule.endHour } : {}),
+    },
   });
 }
 

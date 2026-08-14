@@ -25,6 +25,12 @@ export interface SimulationHourResult {
   coolsense_v3_cumulative_kwh: number;
   static_v3_cumulative_co2: number;
   coolsense_v3_cumulative_co2: number;
+  // Setpoint values (°C) for the temperature-over-time graph. Reported even
+  // during scheduled-off hours — it's "what the thermostat is set to," not
+  // "what the compressor is drawing right now," so it stays populated while
+  // power_kw zeroes out under a schedule.
+  static_v3_temperature_c: number;
+  coolsense_v3_temperature_c: number;
 }
 
 export interface SimulationSummary {
@@ -87,23 +93,44 @@ function worstCaseWeatherFor(weatherCondition: WeatherCondition): { tempC: numbe
   return WEATHER_CONDITION_PRESETS[weatherCondition];
 }
 
+// Sizing occupancy gets a headroom margin above the exact full-mode
+// threshold — generateMockOccupancy's own ±15% noise can realistically push
+// a peak reading above that exact boundary (e.g. medium room: threshold 9
+// people, noise ceiling ceil(9*1.15)=11), and CoolSense V3's required BTU
+// keeps growing per extra person while a baseline sized to the exact
+// threshold does not. Without this margin, static-v3 could be undersized
+// for perfectly realistic crowding, not just an edge case — stress-tested
+// with the app's real noise distribution across 90 simulated weeks, ~67%
+// had at least one hour where CoolSense exceeded an unmargined baseline.
+// 1.2x covers the realistic ±15% noise band with some buffer; it does not
+// (and cannot, for any fixed multiplier) cover arbitrary overcrowding far
+// beyond "full" — a room genuinely packed 50%+ over capacity is a real
+// capacity problem no fixed AC unit sizing solves either.
+const STATIC_V3_SIZING_HEADROOM = 1.2;
+
 // The static-v3 baseline for the CoolSense V3 comparison: sized for the
-// room's full-mode occupancy AND the run's worst-case weather load (never
-// under-capacity for real peak load), and never backs off below what that
-// peak load requires — a naive system doesn't adapt to actual occupancy or
-// weather, so its effective setpoint can't be milder than what full
-// occupancy under worst-case weather already demands. Sizing this against
-// the baseline weather (multiplier=1) regardless of the run's actual
-// weather_condition previously let CoolSense V3's real per-hour weather
-// multiplier exceed this frozen capacity under "hot"/"diurnal" peak
-// conditions — see simulation.test.ts "never exceeds the static-v3 baseline
-// ... under hot/diurnal peak weather". `staticTempC` can still push it
-// COLDER than full mode's own base temp (an explicitly configured
-// aggressive baseline), which raises power further; it just can't make the
-// baseline complacently warmer than what peak crowding needs. Reuses the
-// same 5%/°C scaling rate and floor as staticSystemPowerKw, for consistency.
-function staticV3PowerKw(roomSize: RoomSize, seer: number, staticTempC: number, weatherCondition: WeatherCondition): number {
-  const fullOccupancyPeople = Math.ceil(FULL_DENSITY * ROOM_SIZE_SQM[roomSize]);
+// room's full-mode occupancy (plus the headroom above) AND the run's
+// worst-case weather load (never under-capacity for real peak load), and
+// never backs off below what that peak load requires — a naive system
+// doesn't adapt to actual occupancy or weather, so its effective setpoint
+// can't be milder than what full occupancy under worst-case weather already
+// demands. Sizing this against the baseline weather (multiplier=1)
+// regardless of the run's actual weather_condition previously let CoolSense
+// V3's real per-hour weather multiplier exceed this frozen capacity under
+// "hot"/"diurnal" peak conditions — see simulation.test.ts "never exceeds
+// the static-v3 baseline ... under hot/diurnal peak weather". `staticTempC`
+// can still push it COLDER than full mode's own base temp (an explicitly
+// configured aggressive baseline), which raises power further; it just
+// can't make the baseline complacently warmer than what peak crowding
+// needs. Reuses the same 5%/°C scaling rate and floor as
+// staticSystemPowerKw, for consistency.
+function staticV3Settings(
+  roomSize: RoomSize,
+  seer: number,
+  staticTempC: number,
+  weatherCondition: WeatherCondition,
+): { power_kw: number; temperature_c: number } {
+  const fullOccupancyPeople = Math.ceil(FULL_DENSITY * ROOM_SIZE_SQM[roomSize] * STATIC_V3_SIZING_HEADROOM);
   const worstWeather = worstCaseWeatherFor(weatherCondition);
   const worstCase = calculateAcSettingsV3(fullOccupancyPeople, roomSize, seer, worstWeather.tempC, worstWeather.humidityPct);
   const effectiveStaticTempC = Math.min(staticTempC, worstCase.temperature_c);
@@ -112,7 +139,7 @@ function staticV3PowerKw(roomSize: RoomSize, seer: number, staticTempC: number, 
     STATIC_MIN_POWER_MULTIPLIER,
     1 + STATIC_POWER_CHANGE_PER_DEGREE_C * degreesColderThanFullModeBase,
   );
-  return worstCase.power_kw * multiplier;
+  return { power_kw: worstCase.power_kw * multiplier, temperature_c: effectiveStaticTempC };
 }
 
 // Thailand grid figures — see CLAUDE.md "Metrics Calculated".
@@ -174,6 +201,26 @@ function getWeatherForHour(weatherCondition: WeatherCondition, timestamp: Date |
     return getDiurnalWeather(timestamp);
   }
   return WEATHER_CONDITION_PRESETS[weatherCondition];
+}
+
+export interface OperatingHoursSchedule {
+  startHour: number;
+  endHour: number;
+}
+
+// Simulation-only feature (not wired into the live /calculation endpoint —
+// can't be demoed live, so it's scoped to the comparison tool where its
+// effect is actually visible). Applies uniformly to all four series
+// (static, smart/V2, static-v3, CoolSense V3): outside the window, every
+// model draws zero power, same as a physical on/off timer on the unit
+// itself would produce regardless of which control strategy is "running"
+// during the hours it's on. Handles overnight-wrapping windows
+// (startHour > endHour, e.g. 22-6) by treating them as "on" past midnight
+// up to endHour.
+function isWithinSchedule(hour: number, schedule: OperatingHoursSchedule): boolean {
+  const { startHour, endHour } = schedule;
+  if (startHour <= endHour) return hour >= startHour && hour < endHour;
+  return hour >= startHour || hour < endHour;
 }
 
 // Occupancy targets are expressed as density (people ÷ m²) and converted to
@@ -258,10 +305,13 @@ export function generateMockOccupancy(
  * people counts (oldest first). Pure function over already-fetched data —
  * no DB access — so it's independently testable and reusable regardless of
  * where the readings came from. `capturedAt` (same order/length as
- * `peopleCounts`) is only required when weatherCondition is "diurnal".
+ * `peopleCounts`) is required when weatherCondition is "diurnal" OR when
+ * `schedule` is set (both need each hour's actual clock time).
  * `staticTempC` configures the static/current baseline's setpoint (default
  * 25°C); `comfortPreference` feeds CoolSense V2's ±2°C occupant offset
  * (default neutral, since a simulation run has no single "occupant").
+ * `schedule`, if set, forces every model's power to zero outside its
+ * operating-hours window — see `OperatingHoursSchedule`/`isWithinSchedule`.
  */
 export function runSimulation(
   peopleCounts: number[],
@@ -271,10 +321,13 @@ export function runSimulation(
   capturedAt?: Date[],
   staticTempC: number = DEFAULT_STATIC_TEMP_C,
   comfortPreference: ComfortPreference = "neutral",
+  schedule?: OperatingHoursSchedule,
 ): { hourly: SimulationHourResult[]; summary: SimulationSummary } {
+  if (schedule && !capturedAt) throw new Error("schedule requires capturedAt timestamps");
+
   const hourly: SimulationHourResult[] = [];
   const staticPowerKw = staticSystemPowerKw(staticTempC);
-  const staticV3Kw = staticV3PowerKw(roomSize, seer, staticTempC, weatherCondition);
+  const staticV3 = staticV3Settings(roomSize, seer, staticTempC, weatherCondition);
 
   let currentCumulativeKwh = 0;
   let smartCumulativeKwh = 0;
@@ -304,31 +357,42 @@ export function runSimulation(
       comfortPreference,
     );
 
+    // Outside the operating-hours window (if set), every model is off —
+    // same physical effect an on/off timer on the unit would have
+    // regardless of which control strategy would otherwise be running.
+    const scheduledOff = schedule ? !isWithinSchedule(capturedAt![hour_index].getHours(), schedule) : false;
+    const hourStaticPowerKw = scheduledOff ? 0 : staticPowerKw;
+    const hourSmartPowerKw = scheduledOff ? 0 : smartSettings.power_kw;
+    const hourStaticV3Kw = scheduledOff ? 0 : staticV3.power_kw;
+    const hourCoolsenseV3Kw = scheduledOff ? 0 : v3Settings.power_kw;
+
     // Power (kW) sustained for a 1-hour slice == energy (kWh) for that hour.
-    currentCumulativeKwh += staticPowerKw;
-    smartCumulativeKwh += smartSettings.power_kw;
+    currentCumulativeKwh += hourStaticPowerKw;
+    smartCumulativeKwh += hourSmartPowerKw;
     currentCumulativeCo2 = currentCumulativeKwh * CO2_PER_KWH;
     smartCumulativeCo2 = smartCumulativeKwh * CO2_PER_KWH;
 
-    staticV3CumulativeKwh += staticV3Kw;
-    coolsenseV3CumulativeKwh += v3Settings.power_kw;
+    staticV3CumulativeKwh += hourStaticV3Kw;
+    coolsenseV3CumulativeKwh += hourCoolsenseV3Kw;
     staticV3CumulativeCo2 = staticV3CumulativeKwh * CO2_PER_KWH;
     coolsenseV3CumulativeCo2 = coolsenseV3CumulativeKwh * CO2_PER_KWH;
 
     hourly.push({
       hour_index,
-      current_power_kw: staticPowerKw,
-      smart_power_kw: smartSettings.power_kw,
+      current_power_kw: hourStaticPowerKw,
+      smart_power_kw: hourSmartPowerKw,
       current_cumulative_kwh: currentCumulativeKwh,
       smart_cumulative_kwh: smartCumulativeKwh,
       current_cumulative_co2: currentCumulativeCo2,
       smart_cumulative_co2: smartCumulativeCo2,
-      static_v3_power_kw: staticV3Kw,
-      coolsense_v3_power_kw: v3Settings.power_kw,
+      static_v3_power_kw: hourStaticV3Kw,
+      coolsense_v3_power_kw: hourCoolsenseV3Kw,
       static_v3_cumulative_kwh: staticV3CumulativeKwh,
       coolsense_v3_cumulative_kwh: coolsenseV3CumulativeKwh,
       static_v3_cumulative_co2: staticV3CumulativeCo2,
       coolsense_v3_cumulative_co2: coolsenseV3CumulativeCo2,
+      static_v3_temperature_c: staticV3.temperature_c,
+      coolsense_v3_temperature_c: v3Settings.adjusted_temp_c,
     });
   });
 
