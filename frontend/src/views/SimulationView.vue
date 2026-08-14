@@ -140,6 +140,13 @@ const MIN_AC_SEER = 13;
 const MAX_AC_SEER = 25;
 const acSeer = ref(STANDARD_SEER_V3);
 
+// Static baseline's configurable setpoint (`static_temp_c` on the backend,
+// see supabase/functions/_shared/simulation.ts). Defaults to 21°C — full
+// mode's base temp — since a milder default just gets silently clamped
+// there anyway by staticV3Settings' worst-case-occupancy floor.
+const DEFAULT_STATIC_TEMP_C = 21;
+const staticTempC = ref(DEFAULT_STATIC_TEMP_C);
+
 // Optional operating-hours schedule — simulation-only, since it can't be
 // demoed against the live single-room calculation (see CLAUDE.md). When
 // disabled, every model runs 24/7 (today's behavior, unchanged).
@@ -163,6 +170,7 @@ const lastRunParams = ref({
   roomSize: roomSize.value,
   weatherCondition: weatherCondition.value,
   acSeer: acSeer.value,
+  staticTempC: staticTempC.value,
   scheduleEnabled: scheduleEnabled.value,
   scheduleStartHour: scheduleStartHour.value,
   scheduleEndHour: scheduleEndHour.value,
@@ -174,6 +182,7 @@ const hasPendingChanges = computed(
     roomSize.value !== lastRunParams.value.roomSize ||
     weatherCondition.value !== lastRunParams.value.weatherCondition ||
     acSeer.value !== lastRunParams.value.acSeer ||
+    staticTempC.value !== lastRunParams.value.staticTempC ||
     scheduleEnabled.value !== lastRunParams.value.scheduleEnabled ||
     (scheduleEnabled.value &&
       (scheduleStartHour.value !== lastRunParams.value.scheduleStartHour ||
@@ -218,6 +227,7 @@ async function handleGenerateAndRun() {
         acSeer.value,
         weatherCondition.value,
         schedule.value,
+        staticTempC.value,
       );
       summary.value = result.summary;
       hourlyData.value = await getSimulationHourlyData(result.simulation_run_id);
@@ -227,6 +237,7 @@ async function handleGenerateAndRun() {
       roomSize: roomSize.value,
       weatherCondition: weatherCondition.value,
       acSeer: acSeer.value,
+      staticTempC: staticTempC.value,
       scheduleEnabled: scheduleEnabled.value,
       scheduleStartHour: scheduleStartHour.value,
       scheduleEndHour: scheduleEndHour.value,
@@ -265,7 +276,7 @@ async function handleGenerateAndRun() {
     <div class="flex-1 min-w-0 flex flex-col gap-6">
       <div class="sticky top-4 z-10">
         <Card :title="t('simulation.comparisonSettings')">
-          <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+          <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-4">
             <div class="flex flex-col gap-1.5">
               <label
                 class="text-label-md text-on-surface-variant"
@@ -337,6 +348,21 @@ async function handleGenerateAndRun() {
                 :min="MIN_AC_SEER"
                 :max="MAX_AC_SEER"
                 step="0.1"
+              >
+            </div>
+            <div class="flex flex-col gap-1.5">
+              <label
+                class="text-label-md text-on-surface-variant"
+                for="an_static_temp"
+              >{{ t('simulation.staticTempC') }}</label>
+              <input
+                id="an_static_temp"
+                v-model.number="staticTempC"
+                class="w-full border border-slate-300 rounded-lg px-3 py-2 text-body-md"
+                type="number"
+                min="10"
+                max="30"
+                step="0.5"
               >
             </div>
           </div>

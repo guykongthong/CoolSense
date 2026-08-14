@@ -218,6 +218,7 @@ export function runSimulation(
   acSeer: number,
   weatherCondition: WeatherCondition,
   schedule?: OperatingHoursSchedule,
+  staticTempC?: number,
 ): Promise<SimulationRunResult> {
   return invoke('simulation/run', {
     method: 'POST',
@@ -227,6 +228,7 @@ export function runSimulation(
       ac_seer: acSeer,
       weather_condition: weatherCondition,
       ...(schedule ? { schedule_start_hour: schedule.startHour, schedule_end_hour: schedule.endHour } : {}),
+      ...(staticTempC !== undefined ? { static_temp_c: staticTempC } : {}),
     },
   });
 }
