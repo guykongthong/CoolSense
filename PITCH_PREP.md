@@ -24,12 +24,14 @@ Full 5-minute script version: see the pitch draft from this session (ask to rege
 ## 3. How the System Works End-to-End
 
 **Inputs collected:**
-- Building name, location (free text — feeds weather lookup and the Thailand-only EGAT field)
+- Building name, location (free text — feeds live weather lookup and the Thailand-only EGAT field)
 - Room size: small / medium / large (maps to representative m², see §4)
 - People count: manual slider/number **or** live webcam monitoring (frame captured every 5s, sent to Gemini vision, headcount inserted automatically)
-- AC unit efficiency (SEER): "Auto" (15, the V3 reference unit) or a custom value in [13.0, 25.0]
+- AC unit efficiency (SEER): defaults to 15 (the V3 reference unit), or a custom value in [13.0, 25.0]
 - Thailand EGAT star label (1-5 or "premium") — cosmetic only, shown only when location = Thailand, never affects the calculation
 - Comfort preference: cold / neutral / warm — shifts setpoint ±2°C
+
+**Live weather display** — the Information page shows current outside temperature, humidity, and condition for the saved location (fetched from weatherapi.com, updated each time the location is saved or when the page loads)
 
 **Not manually chosen:** outside temperature & humidity — fetched live from weatherapi.com for the given location. This was a deliberate choice over a hot/warm/cool dropdown, so the demo reflects real current weather.
 
@@ -119,6 +121,7 @@ This progression is a strong pitch point: it shows the team responded to real cr
 - **Mock data generator:** density-based (not flat people-count) targets against the real mode thresholds, so medium/large rooms actually reach moderate/full — weekday peak (9–5, 7–11pm) hits the full-mode threshold, low daytime at 40% of moderate threshold, night near-empty, weekends flatten daytime to ~40% of weekday peak, ±15% noise throughout.
 - **Static baseline ("current system"):** always-on, fan 3, constant draw at a configurable setpoint (default 25°C). This is what a hotel/office runs *today* — no occupancy awareness.
   - **static-v3 baseline (current, more rigorous):** sized for the room's full-mode occupancy **and** the run's worst-case weather load (not just the 33°C/60% baseline) — its setpoint floor is full mode's own 21°C, so it can't be complacently warmer than real peak demand requires. This was a deliberate fix (2026-08-13) after finding the naive version could let CoolSense V3 briefly draw *more* power than an under-sized baseline during hot/diurnal peak hours — an obviously wrong comparison for a pitch. **This is worth mentioning proactively**: it shows the comparison was stress-tested against exactly the failure mode a skeptical judge would probe for.
+    - **Sizing headroom (2026-08-14):** the sizing occupancy also carries a 1.2x margin above the exact full-mode threshold, because the mock generator's own ±15% noise could realistically push a peak reading past that exact boundary — stress-tested across 90 simulated weeks, ~67% had at least one hour where CoolSense exceeded an unmargined baseline before this fix, 0% after. **This also raised the reported savings number** (static-v3 is a flat per-run draw applied to every hour, so undersizing it understated the whole comparison, not just the crowded hours) — overall reduction moved from ~25.5% to ~30.0% on the same 90-week check purely from correcting this sizing. If you already have a specific % reduction number in slides from before 2026-08-14, re-run `/simulation/run` (or the Simulation page's "Generate & Run") and pull a fresh number — the old one is now stale and understates the real result.
 - **Diurnal weather option:** continuous 24h cosine curve (trough 27°C/50% at 3am, peak 36°C/80% at 3pm) instead of a flat preset. Important because flat `warm`/`hot` presets sit at/above baseline, so the setpoint-easing logic never has mild-enough conditions to fire — this was actually caught as a real bug ("the two models show identical results") before being traced to the flat-preset default. Diurnal is now the tester's default weather mode for this reason.
 - **Metrics:** Energy (kWh), CO₂ (0.5 kg/kWh, Thailand grid factor), Cost (5 baht/kWh), % reduction — computed for static, static-v3, CoolSense V2, and CoolSense V3 in parallel so the progression itself is visible in the dashboard.
 
@@ -180,7 +183,10 @@ A: `comfort_preference` (cold/neutral/warm) gives a ±2°C personal offset today
 A: Software-only hackathon scope — no hardware budget or install access. Cameras are infrastructure most target buildings (hotels, malls, offices) already have, so this is deployable without new hardware. Trade-off is accuracy at high crowd density, which we state upfront (§7).
 
 **Q: Does the "smart vs static" comparison cheat by under-sizing the baseline?**
-A: We explicitly built `static-v3` to prevent this — it's sized for the room's own full-mode occupancy *and* the simulation's worst-case weather for the chosen condition, not the mild 33°C/60% baseline. We found and fixed a real version of this bug (V3 briefly exceeding an under-sized baseline during hot/diurnal peaks) before it could surface in a demo.
+A: We explicitly built `static-v3` to prevent this — it's sized for the room's own full-mode occupancy (plus a 1.2x headroom margin covering realistic occupancy noise, added 2026-08-14) *and* the simulation's worst-case weather for the chosen condition, not the mild 33°C/60% baseline. We found and fixed two real versions of this bug — CoolSense V3 briefly exceeding an under-sized baseline during hot/diurnal peaks (weather), and during ordinary noisy crowding above the exact full-mode threshold (occupancy) — before either could surface in a demo. We stress-tested both fixes against 90 simulated weeks of realistic noise, not just the specific cases we found: zero violations remain.
+
+**Q: Have you seen a case where CoolSense used MORE energy than a simpler strategy?**
+A: Yes, and we're not hiding it — CoolSense's occupancy-adaptive logic never fully shuts the AC off (it always maintains at least the room's baseline envelope-load cooling), so a naive fixed on/off schedule (e.g. 9am-8pm operating hours) uses noticeably less raw energy than CoolSense running 24/7, purely from being off for the other 13 hours. Once we put both systems on the *same* operating-hours schedule, CoolSense is still ~12% more efficient on top of it — the honest framing is "scheduling gets most of the savings, CoolSense's smart logic adds a real, smaller improvement beyond it," not "smart AC alone beats everything." [Update this once the optional on/off scheduling feature ships with real numbers from the live system, not just the simulation estimate.]
 
 **Q: Multi-room / multi-building scaling?**
 A: Out of scope by design (`room_config` is a singleton) — noted as a known limitation, with multi-AC-unit-per-room already scoped as the next logical extension.

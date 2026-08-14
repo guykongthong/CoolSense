@@ -22,8 +22,13 @@ const props = withDefaults(
     // the original "{hour_index}h" behavior so existing callers (Simulation,
     // People) are unaffected.
     formatX?: (row: ChartRow) => string;
+    // Y-axis floor. Defaults to 0, right for power/energy series which have
+    // a meaningful zero baseline. Temperature series don't (a 19-26°C range
+    // forced to start at 0 compresses the whole visible swing into a sliver
+    // at the top) — pass a value near the data's realistic minimum instead.
+    yMin?: number;
   }>(),
-  { mode: 'line', xKey: 'hour_index', formatX: undefined },
+  { mode: 'line', xKey: 'hour_index', formatX: undefined, yMin: 0 },
 );
 
 function numAt(row: ChartRow | null | undefined, key: string): number {
@@ -48,14 +53,16 @@ const n = computed(() => props.data.length);
 
 const maxY = computed(() => {
   const values = props.series.flatMap((s) => props.data.map((d) => numAt(d, s.key)));
-  return Math.max(...values, 0) * 1.1 || 1;
+  const rawMax = Math.max(...values, props.yMin);
+  return rawMax + (rawMax - props.yMin) * 0.1 || props.yMin + 1;
 });
 
 function xAt(i: number): number {
   return padL + (n.value <= 1 ? 0 : (i / (n.value - 1)) * plotW);
 }
 function yAt(v: number): number {
-  return padT + plotH - (v / maxY.value) * plotH;
+  const range = maxY.value - props.yMin || 1;
+  return padT + plotH - ((v - props.yMin) / range) * plotH;
 }
 
 function fmtNum(value: number, digits = 1): string {
@@ -65,7 +72,7 @@ function fmtNum(value: number, digits = 1): string {
 const yTicks = computed(() => {
   const ticks = 4;
   return Array.from({ length: ticks + 1 }, (_, t) => {
-    const val = (maxY.value * t) / ticks;
+    const val = props.yMin + ((maxY.value - props.yMin) * t) / ticks;
     return { y: yAt(val), label: fmtNum(val) };
   });
 });
@@ -82,7 +89,7 @@ const xTicks = computed(() => {
 const seriesPaths = computed(() =>
   props.series.map((s) => {
     const pts = props.data.map((d, i) => `${xAt(i)},${yAt(numAt(d, s.key))}`).join(' ');
-    const areaPts = `${xAt(0)},${yAt(0)} ${pts} ${xAt(n.value - 1)},${yAt(0)}`;
+    const areaPts = `${xAt(0)},${yAt(props.yMin)} ${pts} ${xAt(n.value - 1)},${yAt(props.yMin)}`;
     return { ...s, points: pts, areaPoints: areaPts };
   }),
 );

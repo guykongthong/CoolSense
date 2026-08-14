@@ -9,6 +9,7 @@ import { ROOM_IDS, type RoomId } from '../lib/rooms';
 import {
   generateMockData,
   getSimulationHourlyData,
+  type OperatingHoursSchedule,
   runSimulation,
   type RoomSize,
   type SimulationHourlyRow,
@@ -31,6 +32,8 @@ const MODE_KW = { eco: 0.5, moderate: 2.5, full: 4.5 };
 // Replaced immediately once "Generate & Run Comparison" succeeds.
 const STATIC_V3_KW = 2.75;
 const MODE_V3_KW = { eco: 1.0, moderate: 1.8, full: 3.5 };
+const MODE_TEMP_C = { eco: 26, moderate: 24, full: 21 };
+const STATIC_V3_TEMP_C = 21; // matches full mode's base — the static baseline's worst-case clamp
 // Mirrors supabase/functions/_shared/simulation.ts's APP_BASELINE_KWH_PER_DAY /
 // APP_PER_RUN_OVERHEAD_KWH, for this client-side preview only — replaced by
 // the real backend-computed value once "Generate & Run Comparison" succeeds.
@@ -91,6 +94,8 @@ function generateMockComparison(durationHours: number): { hourly: SimulationHour
       coolsense_v3_cumulative_kwh: smartV3Cum,
       static_v3_cumulative_co2: staticV3Cum * CO2_PER_KWH,
       coolsense_v3_cumulative_co2: smartV3Cum * CO2_PER_KWH,
+      static_v3_temperature_c: STATIC_V3_TEMP_C,
+      coolsense_v3_temperature_c: MODE_TEMP_C[mode],
     });
   }
 
@@ -135,6 +140,16 @@ const MIN_AC_SEER = 13;
 const MAX_AC_SEER = 25;
 const acSeer = ref(STANDARD_SEER_V3);
 
+// Optional operating-hours schedule — simulation-only, since it can't be
+// demoed against the live single-room calculation (see CLAUDE.md). When
+// disabled, every model runs 24/7 (today's behavior, unchanged).
+const scheduleEnabled = ref(false);
+const scheduleStartHour = ref(9);
+const scheduleEndHour = ref(20);
+const schedule = computed<OperatingHoursSchedule | undefined>(() =>
+  scheduleEnabled.value ? { startHour: scheduleStartHour.value, endHour: scheduleEndHour.value } : undefined,
+);
+
 const running = ref(false);
 const errorMessage = ref('');
 const summary = ref<SimulationSummary | null>(null);
@@ -148,6 +163,9 @@ const lastRunParams = ref({
   roomSize: roomSize.value,
   weatherCondition: weatherCondition.value,
   acSeer: acSeer.value,
+  scheduleEnabled: scheduleEnabled.value,
+  scheduleStartHour: scheduleStartHour.value,
+  scheduleEndHour: scheduleEndHour.value,
 });
 
 const hasPendingChanges = computed(
@@ -155,7 +173,11 @@ const hasPendingChanges = computed(
     durationHours.value !== lastRunParams.value.durationHours ||
     roomSize.value !== lastRunParams.value.roomSize ||
     weatherCondition.value !== lastRunParams.value.weatherCondition ||
-    acSeer.value !== lastRunParams.value.acSeer,
+    acSeer.value !== lastRunParams.value.acSeer ||
+    scheduleEnabled.value !== lastRunParams.value.scheduleEnabled ||
+    (scheduleEnabled.value &&
+      (scheduleStartHour.value !== lastRunParams.value.scheduleStartHour ||
+        scheduleEndHour.value !== lastRunParams.value.scheduleEndHour)),
 );
 
 // Only static-v3 (the size/weather-aware baseline) vs CoolSense V3 —
@@ -172,6 +194,10 @@ const chartSeries = computed(() => ({
     { key: 'static_v3_cumulative_kwh', color: CURRENT_COLOR, label: t('simulation.staticBaseline') },
     { key: 'coolsense_v3_cumulative_kwh', color: SMART_V3_COLOR, label: t('simulation.smartSystem') },
   ],
+  temperature: [
+    { key: 'static_v3_temperature_c', color: CURRENT_COLOR, label: t('simulation.staticBaseline') },
+    { key: 'coolsense_v3_temperature_c', color: SMART_V3_COLOR, label: t('simulation.smartSystem') },
+  ],
 }));
 
 onMounted(() => {
@@ -186,7 +212,13 @@ async function handleGenerateAndRun() {
   try {
     await withProgress(async () => {
       await generateMockData(durationHours.value, roomSize.value);
-      const result = await runSimulation(durationHours.value, roomSize.value, acSeer.value, weatherCondition.value);
+      const result = await runSimulation(
+        durationHours.value,
+        roomSize.value,
+        acSeer.value,
+        weatherCondition.value,
+        schedule.value,
+      );
       summary.value = result.summary;
       hourlyData.value = await getSimulationHourlyData(result.simulation_run_id);
     });
@@ -195,6 +227,9 @@ async function handleGenerateAndRun() {
       roomSize: roomSize.value,
       weatherCondition: weatherCondition.value,
       acSeer: acSeer.value,
+      scheduleEnabled: scheduleEnabled.value,
+      scheduleStartHour: scheduleStartHour.value,
+      scheduleEndHour: scheduleEndHour.value,
     };
   } catch {
     errorMessage.value = t('simulation.errorFallback');
@@ -305,6 +340,54 @@ async function handleGenerateAndRun() {
               >
             </div>
           </div>
+
+          <div class="mb-4 pt-4 border-t border-slate-200">
+            <label class="flex items-center gap-2 text-label-md text-on-surface-variant mb-2">
+              <input
+                v-model="scheduleEnabled"
+                type="checkbox"
+                class="accent-primary w-4 h-4"
+              >
+              {{ t('simulation.scheduleToggle') }}
+            </label>
+            <p class="text-label-sm text-on-surface-variant mb-2">
+              {{ t('simulation.scheduleHint') }}
+            </p>
+            <div
+              v-if="scheduleEnabled"
+              class="grid grid-cols-2 gap-4 max-w-md"
+            >
+              <div class="flex flex-col gap-1.5">
+                <label
+                  class="text-label-md text-on-surface-variant"
+                  for="an_schedule_start"
+                >{{ t('simulation.scheduleStart') }}</label>
+                <input
+                  id="an_schedule_start"
+                  v-model.number="scheduleStartHour"
+                  class="w-full border border-slate-300 rounded-lg px-3 py-2 text-body-md"
+                  type="number"
+                  min="0"
+                  max="23"
+                >
+              </div>
+              <div class="flex flex-col gap-1.5">
+                <label
+                  class="text-label-md text-on-surface-variant"
+                  for="an_schedule_end"
+                >{{ t('simulation.scheduleEnd') }}</label>
+                <input
+                  id="an_schedule_end"
+                  v-model.number="scheduleEndHour"
+                  class="w-full border border-slate-300 rounded-lg px-3 py-2 text-body-md"
+                  type="number"
+                  min="0"
+                  max="23"
+                >
+              </div>
+            </div>
+          </div>
+
           <div class="flex items-center gap-3">
             <button
               type="button"
@@ -349,6 +432,15 @@ async function handleGenerateAndRun() {
           :data="hourlyData"
           mode="area"
           :series="chartSeries.energy"
+        />
+      </Card>
+
+      <Card :title="t('simulation.temperatureOverTime')">
+        <LineAreaChart
+          :data="hourlyData"
+          mode="line"
+          :series="chartSeries.temperature"
+          :y-min="18"
         />
       </Card>
 
@@ -404,6 +496,12 @@ async function handleGenerateAndRun() {
                 <th class="py-2 pr-4">
                   {{ t('simulation.smartV3CumKwh') }}
                 </th>
+                <th class="py-2 pr-4">
+                  {{ t('simulation.staticV3TempC') }}
+                </th>
+                <th class="py-2 pr-4">
+                  {{ t('simulation.smartV3TempC') }}
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -426,6 +524,12 @@ async function handleGenerateAndRun() {
                 </td>
                 <td class="py-1.5 pr-4">
                   {{ row.coolsense_v3_cumulative_kwh.toFixed(1) }}
+                </td>
+                <td class="py-1.5 pr-4">
+                  {{ row.static_v3_temperature_c.toFixed(1) }}°C
+                </td>
+                <td class="py-1.5 pr-4">
+                  {{ row.coolsense_v3_temperature_c.toFixed(1) }}°C
                 </td>
               </tr>
             </tbody>

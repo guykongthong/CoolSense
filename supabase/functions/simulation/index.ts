@@ -105,6 +105,12 @@ interface RunSimulationBody {
   weather_condition?: string;
   static_temp_c?: number;
   comfort_preference?: string;
+  schedule_start_hour?: number;
+  schedule_end_hour?: number;
+}
+
+function isScheduleHour(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 23;
 }
 
 interface OccupancyReadingRow {
@@ -156,6 +162,28 @@ async function handleRun(req: Request, ctx: SupabaseContext): Promise<Response> 
     );
   }
 
+  // Optional operating-hours schedule — simulation-only, see CLAUDE.md.
+  // Both hours must be given together, or neither (a lone start/end hour is
+  // ambiguous, not a valid partial schedule).
+  const { schedule_start_hour: scheduleStartHour, schedule_end_hour: scheduleEndHour } = body;
+  const scheduleFieldsGiven = [scheduleStartHour !== undefined, scheduleEndHour !== undefined];
+  if (scheduleFieldsGiven[0] !== scheduleFieldsGiven[1]) {
+    return Response.json(
+      { message: "schedule_start_hour and schedule_end_hour must be provided together, or not at all" },
+      { status: 400 },
+    );
+  }
+  let schedule: { startHour: number; endHour: number } | undefined;
+  if (scheduleFieldsGiven[0]) {
+    if (!isScheduleHour(scheduleStartHour) || !isScheduleHour(scheduleEndHour)) {
+      return Response.json(
+        { message: "schedule_start_hour and schedule_end_hour must be integers between 0 and 23" },
+        { status: 400 },
+      );
+    }
+    schedule = { startHour: scheduleStartHour, endHour: scheduleEndHour };
+  }
+
   // deno-lint-ignore no-explicit-any
   const db = ctx.supabaseAdmin as any;
   const { data: readings, error: readError } = await db
@@ -194,6 +222,7 @@ async function handleRun(req: Request, ctx: SupabaseContext): Promise<Response> 
     capturedAt,
     staticTempC,
     comfortPreference,
+    schedule,
   );
 
   const { data: run, error: runError } = await db
@@ -209,6 +238,8 @@ async function handleRun(req: Request, ctx: SupabaseContext): Promise<Response> 
       pct_reduction: summary.pct_reduction,
       static_temp_c: staticTempC,
       comfort_preference: comfortPreference,
+      schedule_start_hour: schedule?.startHour ?? null,
+      schedule_end_hour: schedule?.endHour ?? null,
       static_v3_energy_kwh: summary.static_v3_energy_kwh,
       coolsense_v3_energy_kwh: summary.coolsense_v3_energy_kwh,
       static_v3_co2_kg: summary.static_v3_co2_kg,
@@ -343,6 +374,14 @@ export default {
     --header 'apiKey: sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH' \
     --header 'Content-Type: application/json' \
     --data '{"duration_hours":168,"room_size":"medium","weather_condition":"hot","static_temp_c":25,"comfort_preference":"neutral"}'
+
+  Optional operating-hours schedule (forces both static and CoolSense V3 off
+  outside the window, simulation-only — see CLAUDE.md):
+
+  curl -i --location --request POST 'http://127.0.0.1:54321/functions/v1/simulation/run' \
+    --header 'apiKey: sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH' \
+    --header 'Content-Type: application/json' \
+    --data '{"duration_hours":168,"room_size":"medium","weather_condition":"diurnal","schedule_start_hour":9,"schedule_end_hour":20}'
 
   3. Then retrieve results using the simulation_run_id from step 2's response:
 

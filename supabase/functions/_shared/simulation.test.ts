@@ -275,12 +275,14 @@ Deno.test("runSimulation: static_v3 baseline scales with room size (small < medi
   assertEquals(medium.hourly[0].static_v3_power_kw < large.hourly[0].static_v3_power_kw, true);
 });
 
-Deno.test("runSimulation: static_v3 baseline at default static_temp_c (25°C, clamped to full mode's 21°C) equals the full-occupancy V3 power exactly", () => {
-  // medium room: full-mode implied occupancy = ceil(0.15 * 60) = 9 people.
-  // 25°C is warmer than full mode's 21°C base, so it clamps to 21°C — no
-  // multiplier adjustment (degreesColderThanFullModeBase = 0).
+Deno.test("runSimulation: static_v3 baseline at default static_temp_c (25°C, clamped to full mode's 21°C) equals the headroom-sized full-occupancy V3 power exactly", () => {
+  // medium room: full-mode threshold is ceil(0.15 * 60) = 9 people; sizing
+  // occupancy adds the 1.2x headroom margin (see STATIC_V3_SIZING_HEADROOM
+  // in simulation.ts) → ceil(9 * 1.2) = 11 people. 25°C is warmer than full
+  // mode's 21°C base, so it clamps to 21°C — no multiplier adjustment
+  // (degreesColderThanFullModeBase = 0).
   const { hourly } = runSimulation([0], "medium", 15, "warm", undefined, DEFAULT_STATIC_TEMP_C);
-  const worstCase = calculateCoolSenseV3Settings(9, "medium", 15, 33, 60, "neutral");
+  const worstCase = calculateCoolSenseV3Settings(11, "medium", 15, 33, 60, "neutral");
   assertAlmostEquals(hourly[0].static_v3_power_kw, worstCase.power_kw, 1e-9);
 });
 
@@ -316,6 +318,15 @@ Deno.test("runSimulation: CoolSense V3 never exceeds the static-v3 baseline at f
 Deno.test("runSimulation: CoolSense V3 never exceeds the static-v3 baseline at full occupancy under diurnal peak weather", () => {
   const peakHour = new Date(2026, 7, 10, 15, 0, 0); // 3pm, diurnal peak (36C/80%)
   const { hourly } = runSimulation([5], "small", 15, "diurnal", [peakHour], DEFAULT_STATIC_TEMP_C, "neutral");
+  assertEquals(hourly[0].coolsense_v3_power_kw <= hourly[0].static_v3_power_kw, true);
+});
+
+Deno.test("runSimulation: CoolSense V3 never exceeds the static-v3 baseline when occupancy overshoots the full threshold by realistic noise (+15%)", () => {
+  // medium room: full-mode threshold is 9 people (ceil(0.15*60)). generateMockOccupancy's
+  // own ±15% noise can realistically push a peak reading to ceil(9*1.15) = 11 people —
+  // this isn't a contrived crowd, it's within the noise band the mock generator itself
+  // produces. static_v3 must be sized with enough headroom to still cover it.
+  const { hourly } = runSimulation([11], "medium", 15, "warm", undefined, DEFAULT_STATIC_TEMP_C, "neutral");
   assertEquals(hourly[0].coolsense_v3_power_kw <= hourly[0].static_v3_power_kw, true);
 });
 
@@ -355,4 +366,129 @@ Deno.test("runSimulation: empty input produces a zeroed-out v3 summary too, not 
   assertEquals(summary.static_v3_energy_kwh, 0);
   assertEquals(summary.coolsense_v3_energy_kwh, 0);
   assertEquals(summary.v3_pct_reduction, 0);
+});
+
+// ---- optional operating-hours schedule ----
+
+Deno.test("runSimulation: operating-hours schedule requires capturedAt timestamps", () => {
+  let threw = false;
+  try {
+    runSimulation([10], "medium", 15, "warm", undefined, DEFAULT_STATIC_TEMP_C, "neutral", { startHour: 9, endHour: 20 });
+  } catch {
+    threw = true;
+  }
+  assertEquals(threw, true);
+});
+
+Deno.test("runSimulation: hours outside the schedule window draw zero power for all four models", () => {
+  const peopleCounts = [20, 20, 20]; // 8am, noon, 9pm — same occupancy, only the hour differs
+  const capturedAt = [
+    new Date(2026, 7, 10, 8, 0, 0), // before window
+    new Date(2026, 7, 10, 12, 0, 0), // inside window
+    new Date(2026, 7, 10, 21, 0, 0), // after window
+  ];
+  const { hourly } = runSimulation(peopleCounts, "medium", 15, "warm", capturedAt, DEFAULT_STATIC_TEMP_C, "neutral", {
+    startHour: 9,
+    endHour: 20,
+  });
+
+  assertEquals(hourly[0].current_power_kw, 0);
+  assertEquals(hourly[0].smart_power_kw, 0);
+  assertEquals(hourly[0].static_v3_power_kw, 0);
+  assertEquals(hourly[0].coolsense_v3_power_kw, 0);
+
+  assertEquals(hourly[1].current_power_kw > 0, true);
+  assertEquals(hourly[1].smart_power_kw > 0, true);
+  assertEquals(hourly[1].static_v3_power_kw > 0, true);
+  assertEquals(hourly[1].coolsense_v3_power_kw > 0, true);
+
+  assertEquals(hourly[2].current_power_kw, 0);
+  assertEquals(hourly[2].smart_power_kw, 0);
+  assertEquals(hourly[2].static_v3_power_kw, 0);
+  assertEquals(hourly[2].coolsense_v3_power_kw, 0);
+});
+
+Deno.test("runSimulation: overnight-wrapping schedule (start > end) treats hours past midnight as within the window", () => {
+  const peopleCounts = [20, 20, 20];
+  const capturedAt = [
+    new Date(2026, 7, 10, 23, 0, 0), // 11pm — within a 22-6 overnight window
+    new Date(2026, 7, 10, 2, 0, 0), // 2am — within a 22-6 overnight window
+    new Date(2026, 7, 10, 12, 0, 0), // noon — outside a 22-6 overnight window
+  ];
+  const { hourly } = runSimulation(peopleCounts, "medium", 15, "warm", capturedAt, DEFAULT_STATIC_TEMP_C, "neutral", {
+    startHour: 22,
+    endHour: 6,
+  });
+
+  assertEquals(hourly[0].coolsense_v3_power_kw > 0, true);
+  assertEquals(hourly[1].coolsense_v3_power_kw > 0, true);
+  assertEquals(hourly[2].coolsense_v3_power_kw, 0);
+});
+
+Deno.test("runSimulation: schedule reduces total energy compared to the same run without a schedule", () => {
+  const readings = generateMockOccupancy(168, "medium", { now: new Date(2026, 7, 10, 0, 0, 0), random: () => 0.5 });
+  const peopleCounts = readings.map((r) => r.people_count);
+  const capturedAt = readings.map((r) => new Date(r.captured_at));
+
+  const unscheduled = runSimulation(peopleCounts, "medium", 15, "warm", capturedAt);
+  const scheduled = runSimulation(peopleCounts, "medium", 15, "warm", capturedAt, DEFAULT_STATIC_TEMP_C, "neutral", {
+    startHour: 9,
+    endHour: 20,
+  });
+
+  assertEquals(scheduled.summary.coolsense_v3_energy_kwh < unscheduled.summary.coolsense_v3_energy_kwh, true);
+  assertEquals(scheduled.summary.static_v3_energy_kwh < unscheduled.summary.static_v3_energy_kwh, true);
+});
+
+Deno.test("runSimulation: cumulative sums stay monotonic and match summary totals with a schedule applied", () => {
+  const capturedAt = Array.from({ length: 24 }, (_, h) => new Date(2026, 7, 10, h, 0, 0));
+  const peopleCounts = capturedAt.map(() => 20);
+  const { hourly, summary } = runSimulation(peopleCounts, "medium", 15, "warm", capturedAt, DEFAULT_STATIC_TEMP_C, "neutral", {
+    startHour: 9,
+    endHour: 20,
+  });
+  for (let i = 1; i < hourly.length; i++) {
+    assertEquals(hourly[i].static_v3_cumulative_kwh >= hourly[i - 1].static_v3_cumulative_kwh, true);
+    assertEquals(hourly[i].coolsense_v3_cumulative_kwh >= hourly[i - 1].coolsense_v3_cumulative_kwh, true);
+  }
+  const last = hourly[hourly.length - 1];
+  assertAlmostEquals(last.static_v3_cumulative_kwh, summary.static_v3_energy_kwh, 1e-9);
+  assertAlmostEquals(last.coolsense_v3_cumulative_kwh, summary.coolsense_v3_energy_kwh, 1e-9);
+});
+
+// ---- per-hour temperature (for the Simulation page's temperature-over-time graph) ----
+
+Deno.test("runSimulation: coolsense_v3_temperature_c matches calculateCoolSenseV3Settings's adjusted_temp_c for that hour", () => {
+  const peopleCounts = [0, 5, 20];
+  const { hourly } = runSimulation(peopleCounts, "medium", 15, "warm");
+  peopleCounts.forEach((people, i) => {
+    const expected = calculateCoolSenseV3Settings(people, "medium", 15, 33, 60, "neutral");
+    assertEquals(hourly[i].coolsense_v3_temperature_c, expected.adjusted_temp_c);
+  });
+});
+
+Deno.test("runSimulation: static_v3_temperature_c is constant across the whole run (a naive system doesn't adapt)", () => {
+  const { hourly } = runSimulation([0, 5, 20, 42], "medium", 15, "diurnal", [
+    new Date(2026, 7, 10, 3, 0, 0),
+    new Date(2026, 7, 10, 9, 0, 0),
+    new Date(2026, 7, 10, 15, 0, 0),
+    new Date(2026, 7, 10, 21, 0, 0),
+  ]);
+  const first = hourly[0].static_v3_temperature_c;
+  hourly.forEach((h) => assertEquals(h.static_v3_temperature_c, first));
+});
+
+Deno.test("runSimulation: static_v3_temperature_c matches full mode's base temp (21°C) when static_temp_c is warmer", () => {
+  const { hourly } = runSimulation([0], "medium", 15, "warm", undefined, DEFAULT_STATIC_TEMP_C);
+  assertEquals(hourly[0].static_v3_temperature_c, 21);
+});
+
+Deno.test("runSimulation: temperature fields stay populated (not zeroed) during scheduled-off hours", () => {
+  const capturedAt = [new Date(2026, 7, 10, 3, 0, 0)]; // 3am — outside a 9-20 window
+  const { hourly } = runSimulation([10], "medium", 15, "warm", capturedAt, DEFAULT_STATIC_TEMP_C, "neutral", {
+    startHour: 9,
+    endHour: 20,
+  });
+  assertEquals(hourly[0].coolsense_v3_power_kw, 0); // power is off...
+  assertEquals(typeof hourly[0].coolsense_v3_temperature_c, "number"); // ...but the setpoint value is still reported
 });
