@@ -127,7 +127,13 @@ function generateMockComparison(durationHours: number): { hourly: SimulationHour
 const durationHours = ref(168);
 const roomSize = ref<RoomSize>('medium');
 const weatherCondition = ref<WeatherCondition>('diurnal');
-const acSeer = ref(4.5);
+// Mirrors supabase/functions/_shared/acCalculationV3.ts's STANDARD_SEER_V3 /
+// InformationView.vue's MIN_AC_SEER-MAX_AC_SEER — CoolSense V3 (the only
+// live model) uses a realistic 13-25 SEER range, not V1's old 2-6/4.5.
+const STANDARD_SEER_V3 = 15;
+const MIN_AC_SEER = 13;
+const MAX_AC_SEER = 25;
+const acSeer = ref(STANDARD_SEER_V3);
 
 const running = ref(false);
 const errorMessage = ref('');
@@ -293,8 +299,8 @@ async function handleGenerateAndRun() {
                 v-model.number="acSeer"
                 class="w-full border border-slate-300 rounded-lg px-3 py-2 text-body-md"
                 type="number"
-                min="2"
-                max="6"
+                :min="MIN_AC_SEER"
+                :max="MAX_AC_SEER"
                 step="0.1"
               >
             </div>

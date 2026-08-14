@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { getRoomConfig, ROOM_SIZE_SQM_RANGES, type RoomSize, updateRoomConfig } from '../lib/api';
+import { fetchWeather, getRoomConfig, ROOM_SIZE_SQM_RANGES, type RoomSize, type WeatherReading, updateRoomConfig } from '../lib/api';
 import { t } from '../lib/i18n';
 import { withProgress } from '../lib/progress';
 import { ROOM_IDS, type RoomId } from '../lib/rooms';
@@ -63,6 +63,32 @@ function removeDevice(id: number) {
 const roomLocation = ref('');
 const isThailand = computed(() => roomLocation.value.trim().toLowerCase().includes('thailand'));
 
+const locationSaving = ref(false);
+const locationSaveError = ref(false);
+const locationSaveErrorMessage = ref('');
+const locationSaveSuccess = ref(false);
+
+// Live weather pulled from weatherapi.com (via the `weather` edge function)
+// for whatever location is currently SAVED in room_config — the same
+// reading /calculation itself uses for the weather-load multiplier and
+// setpoint easing, shown here so it's obvious the location field actually
+// does something.
+const weatherReading = ref<WeatherReading | null>(null);
+const weatherLoading = ref(false);
+const weatherError = ref(false);
+
+async function loadWeather() {
+  weatherError.value = false;
+  weatherLoading.value = true;
+  try {
+    weatherReading.value = await fetchWeather();
+  } catch {
+    weatherError.value = true;
+  } finally {
+    weatherLoading.value = false;
+  }
+}
+
 const loading = ref(true);
 const saving = ref(false);
 const loadError = ref(false);
@@ -107,6 +133,8 @@ onMounted(async () => {
   } finally {
     loading.value = false;
   }
+
+  if (roomLocation.value.trim()) await loadWeather();
 });
 
 async function extractErrorMessage(e: unknown): Promise<string> {
@@ -124,6 +152,30 @@ async function extractErrorMessage(e: unknown): Promise<string> {
     // fall through to the generic message below
   }
   return t('information.saveError');
+}
+
+// Independent of saveDevice's per-AC-unit form — location is a single
+// room_config field (like the rest of Room Context), not tied to a specific
+// device, so it gets its own small save action instead of piggybacking on
+// the Technical Specifications form below.
+async function saveLocation() {
+  locationSaveError.value = false;
+  locationSaveErrorMessage.value = '';
+  locationSaveSuccess.value = false;
+  locationSaving.value = true;
+  try {
+    await withProgress(() => updateRoomConfig({ location: roomLocation.value.trim() }));
+    locationSaveSuccess.value = true;
+    // weatherapi.com is queried by whatever location is currently SAVED, not
+    // the input's live value — refetch now that the save landed so the
+    // displayed reading matches the new location.
+    if (roomLocation.value.trim()) await loadWeather();
+  } catch (e) {
+    locationSaveError.value = true;
+    locationSaveErrorMessage.value = await extractErrorMessage(e);
+  } finally {
+    locationSaving.value = false;
+  }
 }
 
 async function saveDevice(idx: number) {
@@ -245,6 +297,86 @@ const fieldWrapClass =
               </dd>
             </template>
           </dl>
+        </div>
+      </section>
+
+      <section class="bg-white rounded-xl border border-outline-variant/50 shadow-[0_4px_20px_rgba(6,78,59,0.05)] p-6 mt-6">
+        <h2 class="text-headline-md text-primary mb-4 pb-2 border-b border-outline-variant/30">
+          {{ t('information.location') }}
+        </h2>
+        <p class="text-label-sm text-on-surface-variant mb-3">
+          {{ t('information.locationHint') }}
+        </p>
+        <div
+          :class="fieldWrapClass"
+          class="mb-3"
+        >
+          <input
+            v-model="roomLocation"
+            type="text"
+            :placeholder="t('information.locationPlaceholder')"
+            class="w-full bg-transparent border-none focus:ring-0 text-on-surface text-body-md py-3 px-4"
+          >
+        </div>
+        <div class="flex items-center gap-3">
+          <button
+            type="button"
+            :disabled="locationSaving"
+            class="bg-primary text-on-primary text-label-md px-6 py-2.5 rounded-lg hover:bg-primary-container transition-colors shadow-sm flex items-center gap-2 disabled:opacity-50"
+            @click="saveLocation"
+          >
+            <span class="material-symbols-outlined text-sm">save</span>
+            {{ locationSaving ? t('information.saving') : t('information.saveLocation') }}
+          </button>
+          <span
+            v-if="locationSaveError"
+            class="text-label-sm text-error"
+          >{{ locationSaveErrorMessage }}</span>
+          <span
+            v-if="locationSaveSuccess"
+            class="text-label-sm text-primary"
+          >{{ t('information.saveSuccess') }}</span>
+        </div>
+
+        <div class="mt-4 pt-4 border-t border-outline-variant/30">
+          <p
+            v-if="weatherLoading"
+            class="text-label-sm text-on-surface-variant"
+          >
+            {{ t('information.weatherLoading') }}
+          </p>
+          <p
+            v-else-if="weatherError"
+            class="text-label-sm text-error"
+          >
+            {{ t('information.weatherError') }}
+          </p>
+          <div
+            v-else-if="weatherReading"
+            class="flex items-center gap-3"
+          >
+            <img
+              v-if="weatherReading.condition_icon_url"
+              :src="weatherReading.condition_icon_url"
+              :alt="weatherReading.condition"
+              class="w-10 h-10"
+            >
+            <div>
+              <div class="text-headline-md text-on-surface">
+                {{ weatherReading.temp_c }}°C
+                <span class="text-label-md text-on-surface-variant font-normal ml-1">{{ weatherReading.humidity_pct }}% {{ t('information.humidity') }}</span>
+              </div>
+              <p class="text-label-sm text-on-surface-variant">
+                {{ weatherReading.condition }}
+              </p>
+            </div>
+          </div>
+          <p
+            v-else
+            class="text-label-sm text-on-surface-variant"
+          >
+            {{ t('information.weatherNone') }}
+          </p>
         </div>
       </section>
     </div>
