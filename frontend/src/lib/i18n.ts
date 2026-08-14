@@ -129,12 +129,6 @@ const messages: Record<Locale, Messages> = {
     'analytics.errorFallback': 'Failed to load — try again.',
 
     'simulation.rooms': 'Rooms',
-    'simulation.currentEnergy': 'Current Energy',
-    'simulation.smartEnergy': 'CoolSense V2 Energy',
-    'simulation.energySaved': 'Energy Saved',
-    'simulation.pctReduction': '% Reduction',
-    'simulation.co2Saved': 'CO₂ Saved',
-    'simulation.costSaved': 'Cost Saved',
     'simulation.powerOverTime': 'Power over time (kW)',
     'simulation.cumulativeEnergy': 'Cumulative energy (kWh)',
     'simulation.temperatureOverTime': 'Temperature over time (°C)',
@@ -185,7 +179,7 @@ const messages: Record<Locale, Messages> = {
     'simulation.netCostSaved': 'Cost saved',
     'simulation.appEnergyFootnote': 'App energy: {kwh} kWh overhead ({pct}% of savings)',
     'simulation.advancedDetails': 'Advanced details',
-    'simulation.advancedDetailsSubtitle': 'V2 legacy comparison and full CoolSense V3 metric breakdown',
+    'simulation.advancedDetailsSubtitle': 'Full CoolSense V3 metric breakdown',
     'simulation.pendingChanges': 'Settings changed — click Run to update results',
   },
   ko: {
@@ -298,12 +292,6 @@ const messages: Record<Locale, Messages> = {
     'analytics.errorFallback': '불러오기 실패 — 다시 시도해주세요.',
 
     'simulation.rooms': '방 목록',
-    'simulation.currentEnergy': '현재 에너지',
-    'simulation.smartEnergy': 'CoolSense V2 에너지',
-    'simulation.energySaved': '절감 에너지',
-    'simulation.pctReduction': '절감률',
-    'simulation.co2Saved': 'CO₂ 절감',
-    'simulation.costSaved': '비용 절감',
     'simulation.powerOverTime': '시간별 전력 (kW)',
     'simulation.cumulativeEnergy': '누적 에너지 (kWh)',
     'simulation.temperatureOverTime': '시간별 온도 (°C)',
@@ -354,7 +342,7 @@ const messages: Record<Locale, Messages> = {
     'simulation.netCostSaved': '절감 비용',
     'simulation.appEnergyFootnote': '앱 에너지: {kwh} kWh 오버헤드 (절감량의 {pct}%)',
     'simulation.advancedDetails': '고급 세부정보',
-    'simulation.advancedDetailsSubtitle': 'V2 레거시 비교 및 CoolSense V3 전체 지표',
+    'simulation.advancedDetailsSubtitle': 'CoolSense V3 전체 지표',
     'simulation.pendingChanges': '설정이 변경되었습니다 — 실행을 눌러 결과를 업데이트하세요',
   },
 };
