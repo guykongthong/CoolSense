@@ -454,7 +454,37 @@ async function handleGenerateAndRun() {
         <p class="text-label-sm text-on-surface-variant mt-2 mb-4">
           {{ t('simulation.advancedDetailsSubtitle') }}
         </p>
-        <div class="grid grid-cols-2 sm:grid-cols-3 gap-4">
+        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+          <StatCard
+            :label="t('simulation.currentEnergy')"
+            :value="`${summary.current_energy_kwh.toFixed(0)} kWh`"
+            value-size="headline"
+          />
+          <StatCard
+            :label="t('simulation.smartEnergy')"
+            :value="`${summary.smart_energy_kwh.toFixed(1)} kWh`"
+            value-size="headline"
+          />
+          <StatCard
+            :label="t('simulation.energySaved')"
+            :value="`${(summary.current_energy_kwh - summary.smart_energy_kwh).toFixed(1)} kWh`"
+            value-size="headline"
+          />
+          <StatCard
+            :label="t('simulation.pctReduction')"
+            :value="`${summary.pct_reduction.toFixed(1)}%`"
+            value-size="headline"
+          />
+          <StatCard
+            :label="t('simulation.co2Saved')"
+            :value="`${(summary.current_co2_kg - summary.smart_co2_kg).toFixed(1)} kg`"
+            value-size="headline"
+          />
+          <StatCard
+            :label="t('simulation.costSaved')"
+            :value="`${(summary.current_cost_baht - summary.smart_cost_baht).toFixed(1)} baht`"
+            value-size="headline"
+          />
           <StatCard
             :label="t('simulation.v3Energy')"
             :value="`${summary.coolsense_v3_energy_kwh.toFixed(1)} kWh`"
