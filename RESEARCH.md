@@ -2,6 +2,8 @@
 
 Strategic findings, design decisions, and research that informed the project architecture.
 
+> **Status note (2026-08-14):** This is a historical research log from earlier in the project (pre-V3). The room-size scale, base setpoints, model name ("hybrid model"), and demo numbers below have since been superseded — see `CLAUDE.md` (source of truth for current specs) and `PITCH_PREP.md` (current pitch-ready summary). Inline notes below flag what changed; the rest is kept as-is for the reasoning/rationale, which is still valid even where the numbers moved on.
+
 ---
 
 ## Thailand AC Standards Research
@@ -35,12 +37,14 @@ Strategic findings, design decisions, and research that informed the project arc
 
 - **Global:** Use SEER-based efficiency (portable across regions)
 - **Thailand-only:** Show EGAT label if user location = Thailand (cosmetic, for credibility)
-- **Room sizes:** Public-space scales (not single offices):
+- **Room sizes (original, since superseded — see note below):** Public-space scales (not single offices):
   - Small: 50-150 m² → use 100 m² midpoint
   - Medium: 150-400 m² → use 275 m² midpoint
   - Large: 400+ m² → use 450 m² midpoint
 
 **Rationale:** Hotel/office/mall context (hackathon use case) requires larger room scales than residential.
+
+> **Superseded 2026-08-13:** Once the live model (V3) started deriving BTU/hr directly from real area+occupancy load instead of a per-mode bucket, these larger m² values produced 50,000-100,000+ BTU/hr requirements — beyond any single real AC unit's range. The scale was lowered to small 20-40 (→30) / medium 40-80 (→60) / large 80+ (→120) m² so results stay servable by one plausible unit. See CLAUDE.md's "Room size → representative m²" and the CoolSense V3 section's "Room-size rescale" note for the full rationale.
 
 ---
 
@@ -72,6 +76,8 @@ Strategic findings, design decisions, and research that informed the project arc
 
 ## Hybrid Model Design
 
+> **Naming note:** what this section calls the "hybrid model" evolved into what's now called **CoolSense V2** (`coolSenseV2Calculation.ts`) — weather-easing + comfort-preference layered on the base BTU-bucket engine. It's since been superseded as the *live* model by **CoolSense V3**, which additionally replaced the underlying BTU-bucket capacity math itself with a real area+occupancy load formula. See CLAUDE.md's CoolSense V2/V3 sections. The reasoning in this section (why setpoints only relax, never tighten, when weather is mild) still applies unchanged in V3.
+
 **Decision:** Combine both models' strengths to improve demo credibility and realism.
 
 ### Architecture
@@ -88,7 +94,7 @@ Strategic findings, design decisions, and research that informed the project arc
 
 ### Temperature Adjustment Logic
 
-**Base setpoints per mode:**
+**Base setpoints per mode (original — eco lowered from 28°C to 26°C on 2026-08-13; current values are in CLAUDE.md's "AC Modes" section):**
 - Eco: 28°C
 - Moderate: 24°C
 - Full: 21°C
@@ -128,6 +134,8 @@ Strategic findings, design decisions, and research that informed the project arc
 ---
 
 ## Demo Strategy: 3-Way Comparison
+
+> **Numbers below are from early testing at the original room-size scale and the pre-V3 model — kept for the "why 3 systems" reasoning, not as current figures.** The live dashboard now runs static, static-v3, CoolSense V2, and CoolSense V3 side by side (see CLAUDE.md's "System Simulation & Comparison" section); pull fresh numbers from an actual `/simulation/run` call for any pitch.
 
 **Why 3 systems?** Shows progression and validates our approach.
 
@@ -309,7 +317,9 @@ Our model optimizes for **energy only**, ignoring:
 
 ## Timeline & Status
 
-| Phase | Status | Notes |
+> Table below is a snapshot from the hybrid-model era — left as historical record. As of 2026-08-14: research, backend, CoolSense V2/V3, frontend (input form, dashboard, camera monitoring UI all exist under `frontend/src/views`), and simulation are all implemented; see `git log` for current state and `PITCH_PREP.md` §9 for what's deliberately still out of scope.
+
+| Phase | Status (at time of writing) | Notes |
 |---|---|---|
 | Research | ✅ Complete | Thailand standards, Excel model integration |
 | Backend | ✅ Complete | All APIs built & tested |

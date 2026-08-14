@@ -41,6 +41,7 @@ Install with: `cd frontend && npm install`
 |---|---|---|
 | `vue` | ^3.5.40 | UI framework |
 | `@supabase/supabase-js` | ^2.112.3 | Supabase client library |
+| `nprogress` | ^0.2.0 | Top-of-page loading bar |
 | `vite` | ^8.2.0 | Build tool & dev server |
 
 ### Development
@@ -51,11 +52,14 @@ Install with: `cd frontend && npm install`
 | `vue-tsc` | ^3.3.8 | Vue TypeScript compiler |
 | `@vitejs/plugin-vue` | ^6.0.8 | Vite Vue plugin |
 | `@vue/tsconfig` | ^0.9.1 | Vue TypeScript config preset |
+| `tailwindcss` | ^4.3.3 | CSS framework |
+| `@tailwindcss/vite` | ^4.3.3 | Tailwind Vite plugin |
 | `eslint` | ^10.8.1 | Code linting |
 | `eslint-plugin-vue` | ^10.10.0 | Vue linting rules |
 | `@eslint/js` | ^10.0.1 | ESLint config |
 | `typescript-eslint` | ^8.67.0 | TypeScript linting |
 | `@types/node` | ^24.13.3 | Node.js type definitions |
+| `@types/nprogress` | ^0.2.3 | nprogress type definitions |
 | `globals` | ^17.10.0 | Global type definitions |
 
 ### Scripts
@@ -98,11 +102,14 @@ Deno runtime is bundled with Supabase CLI. Functions use:
 | `@supabase/supabase-js` | Supabase client | Installed per-function |
 
 **Functions:**
-- `occupancy/` — Mock/ML people count input
-- `calculation/` — AC settings calculation (BTU-based, SEER-scaled)
-- `weather/` — Live weather data (external API)
-- `simulation/` — 168-hour comparison simulation
-- `_shared/` — Shared calculation logic & tests
+- `occupancy/` — reads the latest `occupancy_readings` row (any source), mock fallback if the table is empty
+- `occupancy-readings/` — manual people-count input (`source: 'manual'`)
+- `occupancy-vision/` — webcam frame → Gemini vision (Vertex AI) → people count (`source: 'camera_gemini'`)
+- `room-config/` — GET/PUT the singleton `room_config` row (building/location/room size/SEER/EGAT label/comfort preference/rated capacity)
+- `calculation/` — live AC settings calculation (CoolSense V3 — additive area+occupancy load, SEER-scaled)
+- `weather/` — live weather data by location (weatherapi.com)
+- `simulation/` — mock data generation + 168-hour static vs CoolSense V2/V3 comparison + dashboard retrieval endpoints
+- `_shared/` — shared calculation logic (`acCalculationV3.ts`, `coolSenseV3Calculation.ts`, `simulation.ts`, `geminiOccupancy.ts`, `googleServiceAuth.ts`, `runCalculation.ts`, `occupancyStats.ts`) & their unit tests
 
 ---
 
@@ -118,6 +125,17 @@ Deno runtime is bundled with Supabase CLI. Functions use:
 3. Deployed: Use `supabase secrets set WEATHERAPI_KEY=your_key`
 
 **Rate limit:** 1M calls/month (free tier) — plenty for hackathon
+
+### Camera Occupancy Vision (Gemini via Vertex AI)
+
+**Required for:** Live webcam headcount estimation (`occupancy-vision` function)
+
+**Setup:**
+1. Create a GCP service account with the **Vertex AI User** (`roles/aiplatform.user`) role — grant by exact role ID (`gcloud projects add-iam-policy-binding <project> --member=serviceAccount:<sa-email> --role=roles/aiplatform.user`) since the Console's IAM search surfaces similarly-named decoy roles.
+2. Download the service account key JSON, compact it to one line, add to `supabase/.env`: `GCP_SERVICE_ACCOUNT_JSON={...}`
+3. Deployed: `supabase secrets set GCP_SERVICE_ACCOUNT_JSON='...'`
+
+**Not the Gemini Developer API** — a plain API key was tried first but the project's linked Cloud Billing credit doesn't apply to the Developer API's separate prepay wallet, so authentication goes through Vertex AI + this service account instead (see CLAUDE.md's "Camera-based Occupancy Counting" section for the full story).
 
 ---
 

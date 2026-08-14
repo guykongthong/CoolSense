@@ -21,10 +21,11 @@ chmod +x scripts/setup.sh
 This will:
 1. ✅ Install frontend dependencies
 2. ✅ Install Supabase CLI
-3. ✅ Start local Supabase server
-4. ✅ Apply database migrations
-5. ✅ Create `.env` files from examples
-6. ✅ Print next steps
+3. ✅ Create `supabase/.env` from its example (add your `WEATHERAPI_KEY` afterward — see step 5 below for `GCP_SERVICE_ACCOUNT_JSON` too)
+4. ✅ Start local Supabase server
+5. ✅ Print next steps
+
+The script does not create `frontend/.env` — copy `frontend/.env.example` yourself (see "Environment Variables" below).
 
 ---
 
@@ -80,6 +81,7 @@ Wait for all services to be ready (~30-60 seconds).
 Check that tables were created in Supabase Studio:
 - `room_config`
 - `occupancy_readings`
+- `weather_readings`
 - `ac_calculations`
 - `simulation_runs`
 - `simulation_hourly_data`
@@ -103,6 +105,21 @@ Edit `supabase/.env` and add your API key (get free key at [weatherapi.com](http
 WEATHERAPI_KEY=your_weatherapi_key_here
 ```
 
+To use live camera occupancy counting (`occupancy-vision`), also add a GCP service account key (see DEPENDENCIES.md's "Camera Occupancy Vision" section for how to create one):
+
+```
+GCP_SERVICE_ACCOUNT_JSON={"type":"service_account",...}
+```
+
+This second key is only needed if you're testing the webcam monitoring flow — manual people-count input works without it.
+
+Also create the frontend env file (needed for the Vue app to reach Supabase):
+
+```bash
+cp frontend/.env.example frontend/.env
+# then fill in VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY (printed by `supabase start`)
+```
+
 ### 6. Test the Setup
 
 #### Test Calculation Backend
@@ -117,6 +134,14 @@ open tools/calculation-tester.html
 ```
 
 #### Test API Endpoints
+
+Edge functions that need secrets (`weather`, `occupancy-vision`) must be served with the env file loaded — `supabase start` alone doesn't inject `supabase/.env`:
+
+```bash
+supabase functions serve --env-file supabase/.env
+```
+
+Then, from another terminal:
 
 ```bash
 # Get room config
@@ -155,9 +180,12 @@ supabase start
 cd frontend
 npm run typecheck
 
-# Calculation tests
-cd supabase/functions/_shared
-deno test --allow-all acCalculation.test.ts
+# All shared calculation/logic tests (acCalculationV3, coolSenseV3Calculation,
+# simulation, geminiOccupancy, googleServiceAuth, runCalculation, occupancyStats, ...)
+deno test supabase/functions/_shared/
+
+# Per-function lint/typecheck (from repo root)
+cd supabase/functions/<function-name> && deno lint && deno check --config deno.json index.ts
 ```
 
 ---
@@ -173,11 +201,14 @@ deno test --allow-all acCalculation.test.ts
 ├── supabase/              # Backend + database
 │   ├── migrations/        # SQL migrations (auto-run on start)
 │   ├── functions/         # Deno edge functions
-│   │   ├── occupancy/     # People count endpoint
-│   │   ├── calculation/   # AC settings calculation
-│   │   ├── simulation/    # 168-hour comparison
-│   │   ├── weather/       # Weather API integration
-│   │   └── _shared/       # Shared calculation logic
+│   │   ├── occupancy/          # Latest people-count reading (any source)
+│   │   ├── occupancy-readings/ # Manual people-count input
+│   │   ├── occupancy-vision/   # Webcam frame -> Gemini (Vertex AI) headcount
+│   │   ├── room-config/        # Singleton room_config GET/PUT
+│   │   ├── calculation/        # Live AC settings calc (CoolSense V3)
+│   │   ├── simulation/         # Mock data + 168-hour comparison + dashboard reads
+│   │   ├── weather/            # Weather API integration
+│   │   └── _shared/            # Shared calculation logic & tests
 │   ├── config.toml        # Supabase config
 │   └── .env.example       # Environment template
 ├── tools/                 # Local testing
@@ -196,6 +227,7 @@ deno test --allow-all acCalculation.test.ts
 
 ```
 WEATHERAPI_KEY=your_key_from_weatherapi.com
+GCP_SERVICE_ACCOUNT_JSON={"type":"service_account",...}   # only needed for occupancy-vision (camera monitoring)
 ```
 
 ### Deployment (Supabase Cloud)
@@ -203,6 +235,14 @@ WEATHERAPI_KEY=your_key_from_weatherapi.com
 Set secrets via Supabase dashboard or CLI:
 ```bash
 supabase secrets set WEATHERAPI_KEY=your_key
+supabase secrets set GCP_SERVICE_ACCOUNT_JSON='...'
+```
+
+### Frontend (frontend/.env — copy from frontend/.env.example)
+
+```
+VITE_SUPABASE_URL=
+VITE_SUPABASE_ANON_KEY=
 ```
 
 ---
