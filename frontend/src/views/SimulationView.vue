@@ -167,7 +167,7 @@ async function handleGenerateAndRun() {
           <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-4">
             <div class="flex flex-col gap-1.5">
               <label
-                class="text-label-md text-on-surface-variant"
+                class="text-label-md text-on-surface-variant min-h-[2.5rem] flex items-end"
                 for="an_duration"
               >{{ t('simulation.duration') }}</label>
               <input
@@ -180,7 +180,7 @@ async function handleGenerateAndRun() {
             </div>
             <div class="flex flex-col gap-1.5">
               <label
-                class="text-label-md text-on-surface-variant"
+                class="text-label-md text-on-surface-variant min-h-[2.5rem] flex items-end"
                 for="an_room_size"
               >{{ t('simulation.roomSize') }}</label>
               <select
@@ -201,7 +201,7 @@ async function handleGenerateAndRun() {
             </div>
             <div class="flex flex-col gap-1.5">
               <label
-                class="text-label-md text-on-surface-variant"
+                class="text-label-md text-on-surface-variant min-h-[2.5rem] flex items-end"
                 for="an_weather"
               >{{ t('simulation.weather') }}</label>
               <select
@@ -225,7 +225,7 @@ async function handleGenerateAndRun() {
             </div>
             <div class="flex flex-col gap-1.5">
               <label
-                class="text-label-md text-on-surface-variant"
+                class="text-label-md text-on-surface-variant min-h-[2.5rem] flex items-end"
                 for="an_seer"
               >{{ t('simulation.acSeer') }}</label>
               <input
@@ -240,7 +240,7 @@ async function handleGenerateAndRun() {
             </div>
             <div class="flex flex-col gap-1.5">
               <label
-                class="text-label-md text-on-surface-variant"
+                class="text-label-md text-on-surface-variant min-h-[2.5rem] flex items-end"
                 for="an_static_temp"
               >{{ t('simulation.staticTempC') }}</label>
               <input
