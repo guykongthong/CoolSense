@@ -20,7 +20,9 @@ const peakAtDisplay = computed(() => {
   return t('people.peakAt', { time });
 });
 
-const acTempDisplay = computed(() => (latestCalculation.value ? `${latestCalculation.value.temperature_c}°C` : '—'));
+const acTempDisplay = computed(() =>
+  latestCalculation.value ? `${latestCalculation.value.temperature_c.toFixed(1)}°C` : '—',
+);
 const acModeDisplay = computed(() => (latestCalculation.value ? t(`people.acMode.${latestCalculation.value.ac_mode}`) : ''));
 
 const currentOccupancyDisplay = computed(() => {
