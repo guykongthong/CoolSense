@@ -32,7 +32,7 @@
     border-radius: 8px;
     border: 1px solid #ddd;
   }
-  .dashboard.eco { background: #e8f5e9; border-color: #a5d6a7; }
+  .dashboard.eco { background: #e3f2fd; border-color: #90caf9; }
   .dashboard.moderate { background: #fff8e1; border-color: #ffe082; }
   .dashboard.full { background: #ffebee; border-color: #ef9a9a; }
   .mode { font-size: 1.5rem; font-weight: 700; text-transform: uppercase; }
@@ -126,7 +126,7 @@
     border-top: 2px solid #ddd;
     padding-top: 16px;
     --series-current: #2a78d6;
-    --series-v2: #1baf7a;
+    --series-v2: #00838f;
     --series-v3: #d68f2a;
   }
   .sim-section h3 { font-size: 0.9rem; margin: 20px 0 8px; }
@@ -910,14 +910,14 @@
       renderChart('simPowerChart', 'simPowerTooltip', hourly,
         [
           { key: 'current_power_kw', color: '#2a78d6' },
-          { key: 'smart_power_kw', color: '#1baf7a' },
+          { key: 'smart_power_kw', color: '#00838f' },
           { key: 'coolsense_v3_power_kw', color: '#d68f2a' },
         ],
         'line');
       renderChart('simEnergyChart', 'simEnergyTooltip', hourly,
         [
           { key: 'current_cumulative_kwh', color: '#2a78d6' },
-          { key: 'smart_cumulative_kwh', color: '#1baf7a' },
+          { key: 'smart_cumulative_kwh', color: '#00838f' },
           { key: 'coolsense_v3_cumulative_kwh', color: '#d68f2a' },
         ],
         'area');

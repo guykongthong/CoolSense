@@ -2,6 +2,7 @@ import { type RoomSize } from "./acCalculation.ts";
 import { STANDARD_SEER_V3 } from "./acCalculationV3.ts";
 import type { ComfortPreference } from "./coolSenseV2Calculation.ts";
 import { calculateCoolSenseV3Settings } from "./coolSenseV3Calculation.ts";
+import { DEFAULT_STATIC_TEMP_C, staticV3BaselinePowerKw } from "./simulation.ts";
 
 // TODO: ML JSON shape may change occupancy_readings columns.
 const DEFAULT_ROOM_SIZE: RoomSize = "medium";
@@ -122,6 +123,16 @@ export async function runCalculation(
     ratedCapacityBtuPerHr,
   );
 
+  // What a static unit sized for full occupancy (with headroom) would draw
+  // in the same weather, used by the Analytics page as the live baseline.
+  const baseline_power_kw = staticV3BaselinePowerKw(
+    roomSize,
+    acSeer,
+    DEFAULT_STATIC_TEMP_C,
+    outsideTempC,
+    humidityPct,
+  );
+
   const { data: calculation, error } = await db
     .from("ac_calculations")
     .insert({
@@ -139,6 +150,7 @@ export async function runCalculation(
       comfort_preference: comfortPreference,
       fan_speed: settings.fan_speed,
       power_kw,
+      baseline_power_kw,
       btu_per_hr: settings.btu_per_hr,
       capacity_constrained,
     })

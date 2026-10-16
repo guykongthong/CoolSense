@@ -124,15 +124,15 @@ const STATIC_V3_SIZING_HEADROOM = 1.2;
 // can't make the baseline complacently warmer than what peak crowding
 // needs. Reuses the same 5%/°C scaling rate and floor as
 // staticSystemPowerKw, for consistency.
-function staticV3Settings(
+function staticV3BaselineSettings(
   roomSize: RoomSize,
   seer: number,
   staticTempC: number,
-  weatherCondition: WeatherCondition,
+  tempC: number,
+  humidityPct: number,
 ): { power_kw: number; temperature_c: number } {
   const fullOccupancyPeople = Math.ceil(FULL_DENSITY * ROOM_SIZE_SQM[roomSize] * STATIC_V3_SIZING_HEADROOM);
-  const worstWeather = worstCaseWeatherFor(weatherCondition);
-  const worstCase = calculateAcSettingsV3(fullOccupancyPeople, roomSize, seer, worstWeather.tempC, worstWeather.humidityPct);
+  const worstCase = calculateAcSettingsV3(fullOccupancyPeople, roomSize, seer, tempC, humidityPct);
   const effectiveStaticTempC = Math.min(staticTempC, worstCase.temperature_c);
   const degreesColderThanFullModeBase = worstCase.temperature_c - effectiveStaticTempC;
   const multiplier = Math.max(
@@ -140,6 +140,29 @@ function staticV3Settings(
     1 + STATIC_POWER_CHANGE_PER_DEGREE_C * degreesColderThanFullModeBase,
   );
   return { power_kw: worstCase.power_kw * multiplier, temperature_c: effectiveStaticTempC };
+}
+
+// Power draw (kW) of the static-v3 baseline at the given outdoor conditions.
+// Shared with runCalculation so the live app can store what a naive,
+// full-occupancy-sized unit would be drawing right now.
+export function staticV3BaselinePowerKw(
+  roomSize: RoomSize,
+  seer: number,
+  staticTempC: number,
+  tempC: number,
+  humidityPct: number,
+): number {
+  return staticV3BaselineSettings(roomSize, seer, staticTempC, tempC, humidityPct).power_kw;
+}
+
+function staticV3Settings(
+  roomSize: RoomSize,
+  seer: number,
+  staticTempC: number,
+  weatherCondition: WeatherCondition,
+): { power_kw: number; temperature_c: number } {
+  const worstWeather = worstCaseWeatherFor(weatherCondition);
+  return staticV3BaselineSettings(roomSize, seer, staticTempC, worstWeather.tempC, worstWeather.humidityPct);
 }
 
 // Thailand grid figures — see CLAUDE.md "Metrics Calculated".
