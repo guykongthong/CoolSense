@@ -262,6 +262,75 @@ Base BTU/hr is also scaled by a room-size multiplier (small ×0.7, medium ×1.0,
 
 ---
 
+## Carbon Analytics
+
+The Analytics page has a fourth tab, **Carbon** (`frontend/src/views/AnalyticsView.vue`, logic in `frontend/src/lib/carbon.ts`).
+
+- **Live baseline:** `ac_calculations.baseline_power_kw` (nullable numeric, migration `20261016080000_add_baseline_power_kw.sql`) is filled by `_shared/runCalculation.ts` on every live calculation. It is what a static unit sized for full occupancy would draw in the same weather: `staticV3BaselinePowerKw(roomSize, seer, staticTempC, tempC, humidityPct)`, exported from `_shared/simulation.ts` and reused by `staticV3Settings` (same 1.2x `STATIC_V3_SIZING_HEADROOM`, `DEFAULT_STATIC_TEMP_C` setpoint). Older rows have a null baseline and are excluded from the carbon totals; the UI says so.
+- **Integration:** `carbon.ts` treats `ac_calculations` rows as a step function: each row's `power_kw` holds until the next row's `calculated_at`, capped at `MAX_GAP_MIN = 60` so a gap in readings is not counted as running time. Intervals are split across bucket boundaries. Today uses 24 hourly buckets, 7d/30d use daily buckets. Carbon = kWh x `CO2_KG_PER_KWH` (0.5, mirrors `CO2_PER_KWH` in `simulation.ts`).
+- **What the tab shows:** CO2 emitted (kg), CO2 avoided vs baseline (kg), % reduction, a bar chart of emitted kg with the baseline as a line, a cumulative-avoided area chart, and a "From latest simulation run" card (static-v3 vs CoolSense V3 cumulative CO2 from `simulation_hourly_data`) as a fallback when little live data exists.
+
+## Maintenance / Cleaning Alerts
+
+A dirty filter or fouled coil makes an AC draw more power than CoolSense V3 predicts for the same conditions. The Maintenance page (`frontend/src/views/MaintenanceView.vue`) surfaces that as a cleaning alert. Software only: there is no real power meter, so `ac_power_readings` is fed by a mock generator (`source = 'mock'`), with `'meter'` reserved for real data later. Demo data is labelled as such in the UI.
+
+**Tables** (migration `20261016090000_add_maintenance.sql`; RLS enabled, select policies for anon/authenticated, full grants for service_role, both tables added to `supabase_realtime`):
+- `ac_power_readings`: hourly `power_kw` (measured) next to `expected_power_kw` (CoolSense V3 under the same conditions), plus `setpoint_c`, `outside_temp_c`, `humidity_pct`, `people_count`, `capacity_constrained`, `source` ('mock' | 'meter').
+- `maintenance_alerts`: `severity` (watch | warning | critical), `status` (open | acknowledged | dismissed | resolved), `excess_pct`, `baseline_ratio`, `recent_ratio`, `buckets_evaluated`, `worst_bucket` (jsonb), window and lifecycle timestamps, `note`. A partial unique index allows at most one row in status open/acknowledged.
+- `room_config.last_serviced_at` (nullable): set by "Mark as cleaned"; baseline data before it is ignored.
+
+**Detection** (`supabase/functions/_shared/maintenanceDetection.ts`, pure and tested; every threshold is an exported constant):
+1. Keep running hours only: `power_kw > 0`, `expected_power_kw > 0`, not `capacity_constrained`. Ratio r = measured / expected.
+2. Bucket by setpoint (rounded to 1C) x outside temp (`OUTSIDE_TEMP_BAND_C = 2` bands) so weather and occupancy shifts are not mistaken for dirt.
+3. Baseline window: from `max(last_serviced_at, now - BASELINE_MAX_DAYS (90))` to `now - BASELINE_END_DAYS_AGO (14)`. Recent window: last `RECENT_DAYS` (7). Fewer than `MIN_BASELINE_DAYS` (14) of baseline returns `insufficient_data`.
+4. A bucket qualifies with `MIN_BASELINE_SAMPLES` (12) baseline and `MIN_RECENT_SAMPLES` (6) recent samples. Bucket excess = median(recent r) / median(baseline r) - 1.
+5. Gates: at least `MIN_QUALIFYING_BUCKETS` (3) qualifying buckets or `MIN_RECENT_SAMPLES_TOTAL` (24) recent samples; at least `MIN_POSITIVE_BUCKET_SHARE` (60%) of buckets with positive excess; persistence, meaning each half of the recent window (0-3.5d, 3.5-7d) must exceed the watch threshold on its own (`MIN_HALF_SAMPLES` = 2 per half), so a one-day spike does not alert.
+6. Overall excess is the sample-weighted mean of bucket excess. Severity: under `WATCH_EXCESS` 10% healthy, 10-20% watch, `WARNING_EXCESS` 20-35% warning, `CRITICAL_EXCESS` 35%+ critical.
+7. Lifecycle (`decideAlertAction`): an active alert auto-resolves when excess drops under `RESOLVE_EXCESS` (5%), which gives hysteresis between 5% and 10%. A dismissed alert suppresses the same or lower severity for `DISMISS_SUPPRESS_DAYS` (7); an escalation opens a new alert. "Mark as cleaned" sets `last_serviced_at = now` and resolves live alerts.
+
+**Mock generator** (`generateMockPowerReadings`): hourly rows built from `generateMockOccupancy`, `getDiurnalWeather` and `calculateCoolSenseV3Settings`; measured = expected x (1 +/- `MOCK_NOISE_AMPLITUDE` 8%) x a ramp that rises over a week to `degradation_pct` after `degradation_start_day`. Replaces existing `source = 'mock'` rows only.
+
+**Edge function** (`supabase/functions/maintenance`, registered in `supabase/config.toml` with `verify_jwt = false`; curl examples at the bottom of `index.ts`):
+- `POST /maintenance/evaluate`: run detection, create/update/resolve the alert, return `{ evaluation, alert, action }`
+- `GET /maintenance/alerts?status=`: alerts, newest first (max 50)
+- `GET /maintenance/trend?days=30`: `{ baseline_ratio, points: [{ date, actual_kwh, expected_baseline_kwh, ratio }] }` (days 1-90)
+- `PATCH /maintenance/alerts/:id` body `{ status: 'acknowledged' | 'dismissed', note? }`
+- `POST /maintenance/mark-serviced`
+- `POST /maintenance/generate-mock-data` body `{ days?: 60, degradation_start_day?: 45, degradation_pct?: 25 }`; also clears alerts and `last_serviced_at`
+
+The frontend calls evaluate on app start (nav badge via `composables/useMaintenanceAlerts.ts`, which also subscribes to Realtime on `maintenance_alerts`) and on page mount. API wrapper: `frontend/src/lib/maintenanceApi.ts`.
+
+---
+
+## Frontend Shell, Theme and Locale
+
+- **Router:** `vue-router` 4 with hash history (`frontend/src/router.ts`). Routes `/people`, `/information`, `/analytics`, `/simulation`, `/maintenance`; `/` and unknown paths redirect to `/people`. Page title/subtitle/nav label keys and icon live in route `meta`; `App.vue` renders `<RouterView>` and builds the nav from the routes.
+- **Theme:** blue. Tokens are in the single `@theme` block of `frontend/src/style.css` (Material 3 role names; primary `#0b4a8b`, plus `warning`, `success` and `shadow-card` tokens). Chart colours are mirrored in `frontend/src/lib/chartColors.ts` (CoolSense chart-1 blue, baseline chart-2 grey, people chart-3 orange, temperature chart-4 cyan). Do not hardcode greens; use tokens.
+- **UI language:** English and Thai (`Locale = 'en' | 'th'`, `frontend/src/lib/i18n.ts`, messages in `frontend/src/lib/locales/{core,carbon,maintenance}.ts`). Korean was removed as a UI language; a stored `'ko'` falls back to English. `setLocale` updates `<html lang>`. Numbers, dates and baht go through `frontend/src/lib/format.ts` (`en-US` / `th-TH`). Font stack is Inter plus Noto Sans Thai.
+- **Layout:** responsive. Fixed bottom nav on mobile (`md:hidden`), side nav on desktop, skip-to-content link, visible focus rings, reduced-motion respected.
+- `LineAreaChart.vue` is still hand-written SVG (no chart library); it supports `line`/`area`/`bar` modes, reference lines, pointer and keyboard inspection, and an sr-only data table.
+- The target market is Thai AC units only. The "Korean-market air conditioner" checkbox/grade was removed from the Information page UI; the Thailand EGAT label stays.
+
+---
+
+## Demo Mode: Floors, Rooms and AC Units (frontend only)
+
+The real backend is still single-room (`room_config` `id=1`, one AC) and is unchanged. Only demo mode (`VITE_DEMO_MODE=true` or no Supabase URL) has floors with several rooms, each with several AC units; real-mode code paths ignore the optional floor/room/unit arguments.
+
+- **Model** (`frontend/src/lib/mock/rooms.ts`): floors (id, name, order, building id) > rooms (name, size, own occupancy curve, belongs to exactly one floor) > AC units (label, SEER, rated BTU/h, EGAT label). Seed: Floor 1 (Lobby, Meeting Room A with 2 units), Floor 2 (Open Office North, 2 units), Floor 3 (Server / Lab Room, Executive Office with 2 units), 8 units in total. Seeded floors and rooms are named through the locale files (en/th). A unit carries a share of its room's load proportional to its capacity, so unit kW add up to the room, rooms to the floor and floors to the building. Floors, rooms and units persist in localStorage (`coolsense_demo_floors_v2`, `coolsense_demo_rooms_v2`, `coolsense_demo_units_v2`; the older unversioned keys are ignored and stored data is validated on load, bad entries are dropped or reattached to the first floor). Rules: every room keeps at least one unit (the last unit goes only with its room), a building keeps at least one floor and, once it has rooms, at least one room; deleting a floor deletes its rooms and units after a confirm; a room can be moved to another floor.
+- **Selector:** scope is `'all'` (every floor of the active building) or a floor id. `components/layout/FloorSelector.vue` is a dropdown in the header and a scrollable chip row under the page title on phones; state in `composables/useSelectedFloor.ts` (localStorage `coolsense_demo_selected_floor`, labels 'All floors' / 'Floor 1' ..., Thai 'ทุกชั้น' / 'ชั้น 1'). Overview, Analytics, Simulation, Device and Maintenance follow it. Mock functions and the `api.ts` / `carbon.ts` / `maintenanceApi.ts` wrappers take an optional floor id (default all floors).
+- **Pages:** Overview shows, for one floor, a summary strip (people, units running, CO2 saved today, open maintenance alerts) and its rooms with `ui/AcUnitCard.vue` tiles; for All floors one collapsible card per floor with the same summary. A tile opens that unit's edit form on the Device page directly (`/device?unit=<id>`). Device (`components/rooms/RoomManager.vue`) is a one-level-at-a-time drill-down with breadcrumbs: Floors, then a floor's rooms, then a room's air cons, then one air con (edit form, Save, Cancel, Remove with confirm); `?unit=`, `?room=` and `?floor=` are resolved synchronously on load and the header floor selector opens that floor's level. Floor and room settings (rename, size, move, delete) sit behind a button on their level. Analytics ranks floors when All floors is selected and rooms when a floor is. Simulation sums the rooms of the scope; with exactly one room it prefills size and SEER from it, otherwise those fields are disabled. Maintenance (`views/MaintenanceView.vue`, parts in `components/maintenance/`, state in `composables/useMaintenancePage.ts`) groups the selected scope like the Overview: one floor shows a summary strip (units needing attention, open alerts, longest since cleaned), All floors one collapsible card per floor (floors with problems open by default, Expand all button), then rooms and a `MaintenanceUnitCard` per air con (breadcrumb Floor > Room > Unit, status chip, extra power %, last cleaned, View details, Mark as cleaned with inline confirm; worst status first). Selecting a unit opens a highlighted detail panel below ('Details for Floor 2 > Open Office North > Unit 2': status, Evaluate now, Mark as cleaned, that unit's alerts with Acknowledge/Dismiss and status filter, trend charts, Back to overview); the worst unit is selected by default when there are problems. Page-level Evaluate all sits at the top. Real mode shows a single card plus its details. Seeded scenario: Open Office North unit 2 is a WARNING (+24%), Meeting Room A unit 1 is a WATCH (+12%), the rest are healthy. The nav badge counts open alerts of the active building. "Units running" on the Overview counts units in rooms that have people in them right now.
+
+### Buildings and Settings (demo mode)
+
+- **Buildings** (`frontend/src/lib/mock/buildings.ts`): a user can have several buildings (`{id, name, location}`), seeded with 'Main Building' in 'Bangkok, Thailand', stored in localStorage (`coolsense_demo_buildings_v1`, bad data falls back to the seed). The last building cannot be deleted. Floors carry a `buildingId`; a new building gets Floor 1 with one room and one unit (`seedBuildingDefaults` in `rooms.ts`), and deleting one removes its floors, rooms and units (`removeBuildingData`). `composables/useBuildings.ts` pairs those calls.
+- **Selected building:** `composables/useSelectedBuilding.ts` (`coolsense_demo_selected_building`, falls back to the first building) tells `rooms.ts` which building is active, so the floor selector and every page only see that building's floors.
+- **Location and weather:** each building has its own location text; its mock weather (temp, humidity, condition) is derived from that text by `buildingWeather()` (Bangkok is about 32C). `composables/useBuildingLocation.ts` returns the current location and `isThailand` (demo: current building, real mode: the saved `room_config.location`); the EGAT option on the unit form depends on it.
+- **Settings page** (`/settings`, `views/SettingsView.vue`, `components/settings/*`, strings in `lib/locales/settings.ts`): building cards with Edit, Delete (with confirm) and 'Switch to this building', plus Add building. In real mode it shows the single `room_config` location as one editable card (no add, delete or switch). Location editing no longer lives on the Device page.
+- **Header chip** (`components/layout/BuildingChip.vue`): pin, building name and temperature. With more than one building it opens a switcher with a 'Manage buildings' link, otherwise it links to Settings. On phones it shrinks to the pin icon.
+
+---
+
 ## What NOT to Include
 
 - Real AC hardware control
@@ -269,7 +338,7 @@ Base BTU/hr is also scaled by a room-size multiplier (small ×0.7, medium ×1.0,
 - Building/training a custom ML model — camera-based occupancy counting calls the third-party Gemini vision API instead (see "Camera-based Occupancy Counting" above), no in-house model
 - Multi-building database
 - User authentication
-- Mobile responsiveness
+- Real power-meter integration (maintenance detection runs on mock `ac_power_readings`; `source = 'meter'` is reserved for later)
 
 ---
 

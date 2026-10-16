@@ -10,6 +10,7 @@ Built in a 2-day hackathon. 🏆 **Hackathon winner.**
 - [The Solution](#the-solution)
 - [How It Works](#how-it-works)
 - [The Algorithm](#the-algorithm-coolsense-v3)
+- [Carbon Analytics and Cleaning Alerts](#carbon-analytics-and-cleaning-alerts)
 - [Impact](#impact)
 - [Tech Stack](#tech-stack)
 - [Project Structure](#project-structure)
@@ -97,6 +98,14 @@ A comfort preference (cold/neutral/warm) then shifts the setpoint a further ±2�
 
 **Simulation:** the mock data generator produces a realistic week (or any duration) of hourly occupancy — weekday peaks near full-mode threshold, quiet nights, flattened weekends, ±15% noise — and `/simulation/run` compares an always-on baseline against CoolSense hour-by-hour, storing both the summary and the full hourly breakdown for the dashboard's graphs.
 
+## Carbon Analytics and Cleaning Alerts
+
+**Carbon analytics.** The Analytics page has a Carbon tab showing CO₂ emitted, CO₂ avoided against a static baseline, and the % reduction, for today (hourly), 7 days and 30 days. Every live calculation stores the power a static unit sized for full occupancy would have drawn in the same weather (`ac_calculations.baseline_power_kw`), and the page integrates both series over time at 0.5 kg CO₂ per kWh. Rows saved before that column existed have no baseline and are left out.
+
+**Cleaning alerts.** The Maintenance page flags when an AC draws noticeably more power than CoolSense V3 expects for the same setpoint and outside temperature, which is what a dirty filter or coil looks like. It compares the last 7 days against the unit's own history in matching setpoint and weather buckets, and reports watch (10%+ extra), warning (20%+) or critical (35%+). Alerts can be acknowledged, dismissed, or cleared by marking the unit as cleaned. There is no real power meter, so the page runs on generated demo data (use "Generate demo data" on the page); real readings can replace it later. Details are in [`CLAUDE.md`](./CLAUDE.md).
+
+The interface is available in English and Thai (toggle in the header) and uses a blue theme.
+
 ## Impact
 
 Example 168-hour (1-week) simulated comparison for a mid-size hotel room:
@@ -124,10 +133,11 @@ Scaled across all Thai hotels, savings on this order translate to on the order o
 .
 ├── frontend/                    # Vue 3 app
 │   └── src/
-│       ├── views/                # InformationView, PeopleView, SimulationView, AnalyticsView
+│       ├── router.ts             # vue-router (hash history): people, information, analytics, simulation, maintenance
+│       ├── views/                # InformationView, PeopleView, SimulationView, AnalyticsView, MaintenanceView
 │       ├── components/
-│       ├── composables/          # e.g. useOccupancy.ts, useCameraOccupancy.ts
-│       └── lib/
+│       ├── composables/          # e.g. useOccupancy.ts, useCameraOccupancy.ts, useMaintenanceAlerts.ts
+│       └── lib/                  # api clients, carbon.ts, format.ts, i18n.ts, locales/ (en + th)
 ├── supabase/
 │   ├── functions/                # Deno edge functions
 │   │   ├── occupancy/              # Read latest people-count reading (any source)
@@ -137,8 +147,9 @@ Scaled across all Thai hotels, savings on this order translate to on the order o
 │   │   ├── weather/                 # Live weather by location
 │   │   ├── calculation/            # Live AC settings calculation (CoolSense V3)
 │   │   ├── simulation/             # Mock data generation, comparison run, dashboard reads
+│   │   ├── maintenance/            # Cleaning alerts: evaluate, alerts, trend, mark-serviced, demo data
 │   │   └── _shared/                 # Core calculation logic + unit tests
-│   └── migrations/                # SQL schema, in chronological order
+│   └── migrations/                # SQL schema, in chronological order (latest: baseline_power_kw, maintenance tables)
 ├── tools/
 │   └── calculation-tester.html    # Standalone calculator/simulator — no backend needed
 ├── scripts/
@@ -177,6 +188,8 @@ cp frontend/.env.example frontend/.env
 # 3. Start local Supabase (applies migrations automatically)
 cd supabase && supabase start && cd ..
 ```
+
+If you already had a local stack running before pulling these changes, apply the newer migrations (`20261016080000_add_baseline_power_kw.sql` and `20261016090000_add_maintenance.sql`) with `supabase db reset` locally, or `supabase db push` for a hosted project.
 
 `supabase start` prints your local API URL and anon key — put those in `frontend/.env`:
 
@@ -256,13 +269,18 @@ Deployment is automated on push to `main` (`.github/workflows/deploy.yml`):
 - **Frontend** → Vercel
 - **Edge functions** → `supabase functions deploy`
 
+The workflow does not apply database migrations. Run `supabase db push` against the hosted project before merging changes that add migrations, including `20261016080000` and `20261016090000` (carbon baseline column and cleaning-alert tables). The frontend and the `maintenance` and `calculation` functions fail against a database that lacks them.
+
 Manual deploy:
 
 ```bash
 # Frontend
 cd frontend && npm run build   # then deploy dist/ via Vercel
 
-# Backend
+# Backend: push migrations first (adds ac_calculations.baseline_power_kw,
+# 20261016080000, and the maintenance tables, 20261016090000), then deploy functions.
+# The deploy workflow does not run migrations.
+supabase db push
 supabase functions deploy
 supabase secrets set WEATHERAPI_KEY=your_key
 supabase secrets set GCP_SERVICE_ACCOUNT_JSON='...'   # optional, for camera occupancy
