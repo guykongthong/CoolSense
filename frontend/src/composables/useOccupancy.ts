@@ -1,6 +1,9 @@
-import { onMounted, onUnmounted, ref } from 'vue';
+import { onMounted, onUnmounted, ref, watch } from 'vue';
 import { supabase } from '../lib/supabaseClient';
 import { withProgress } from '../lib/progress';
+import { isDemoMode } from '../lib/mock/mode';
+import { mockLatestReading, subscribeLive } from '../lib/mock/api';
+import { useSelectedFloor } from './useSelectedFloor';
 
 // TODO: ML JSON shape — columns will change once the teammate's
 // Google Cloud service output format is known.
@@ -13,8 +16,19 @@ interface OccupancyReading {
 
 export function useOccupancy() {
   const latestReading = ref<OccupancyReading | null>(null);
+  const { selectedFloor } = useSelectedFloor();
+  if (isDemoMode) watch(selectedFloor, (floor) => (latestReading.value = mockLatestReading(floor)));
 
   onMounted(async () => {
+    if (isDemoMode) {
+      latestReading.value = mockLatestReading(selectedFloor.value);
+      const stop = subscribeLive((reading) => {
+        latestReading.value = reading;
+      }, () => selectedFloor.value);
+      onUnmounted(stop);
+      return;
+    }
+
     const { data } = await withProgress(() =>
       supabase
         .from('occupancy_readings')

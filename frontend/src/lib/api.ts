@@ -1,4 +1,6 @@
 import { supabase } from './supabaseClient';
+import { isDemoMode } from './mock/mode';
+import * as mock from './mock/api';
 
 export type RoomSize = 'small' | 'medium' | 'large';
 export type AcMode = 'eco' | 'moderate' | 'full';
@@ -162,14 +164,18 @@ async function invoke<T>(
 }
 
 export function getRoomConfig(): Promise<RoomConfig> {
+  if (isDemoMode) return Promise.resolve(mock.mockGetRoomConfig());
   return invoke('room-config', { method: 'GET' });
 }
 
 export function updateRoomConfig(update: RoomConfigUpdate): Promise<RoomConfig> {
+  if (isDemoMode) return Promise.resolve(mock.mockUpdateRoomConfig(update));
   return invoke('room-config', { method: 'PUT', body: update });
 }
 
-export function getOccupancy(): Promise<OccupancyReading> {
+// floorId (here and below) is a floor id or 'all', only matters in demo mode, the real backend has a single room.
+export function getOccupancy(floorId?: string): Promise<OccupancyReading> {
+  if (isDemoMode) return Promise.resolve(mock.mockLatestReading(floorId));
   return invoke('occupancy', { method: 'GET' });
 }
 
@@ -178,11 +184,13 @@ export interface OccupancyPeak {
   captured_at: string | null;
 }
 
-export function getPeakOccupancyToday(): Promise<OccupancyPeak> {
+export function getPeakOccupancyToday(floorId?: string): Promise<OccupancyPeak> {
+  if (isDemoMode) return Promise.resolve(mock.mockPeak(floorId));
   return invoke('occupancy/peak-today', { method: 'GET' });
 }
 
 export function postOccupancyReading(peopleCount: number, source = 'manual'): Promise<OccupancyReading> {
+  if (isDemoMode) return Promise.resolve(mock.mockPostReading(peopleCount, source));
   return invoke('occupancy-readings', { method: 'POST', body: { people_count: peopleCount, source } });
 }
 
@@ -192,18 +200,22 @@ export interface OccupancyVisionResult {
 }
 
 export function postOccupancyPhoto(imageBase64: string, mimeType: string): Promise<OccupancyVisionResult> {
+  if (isDemoMode) return Promise.resolve(mock.mockPhoto());
   return invoke('occupancy-vision', { method: 'POST', body: { image_base64: imageBase64, mime_type: mimeType } });
 }
 
 export function fetchWeather(): Promise<WeatherReading> {
+  if (isDemoMode) return Promise.resolve(mock.mockWeather());
   return invoke('weather', { method: 'POST' });
 }
 
-export function getCalculation(): Promise<AcCalculation> {
+export function getCalculation(floorId?: string): Promise<AcCalculation> {
+  if (isDemoMode) return Promise.resolve(mock.mockCalculation(floorId));
   return invoke('calculation', { method: 'GET' });
 }
 
-export function generateMockData(durationHours: number, roomSize: RoomSize): Promise<GenerateMockDataResult> {
+export function generateMockData(durationHours: number, roomSize: RoomSize, floorId?: string): Promise<GenerateMockDataResult> {
+  if (isDemoMode) return Promise.resolve(mock.mockGenerateData(durationHours, roomSize, floorId));
   return invoke('simulation/generate-mock-data', { method: 'POST', body: { duration_hours: durationHours, room_size: roomSize } });
 }
 
@@ -219,7 +231,11 @@ export function runSimulation(
   weatherCondition: WeatherCondition,
   schedule?: OperatingHoursSchedule,
   staticTempC?: number,
+  floorId?: string,
 ): Promise<SimulationRunResult> {
+  if (isDemoMode) {
+    return Promise.resolve(mock.mockRunSimulation(durationHours, roomSize, acSeer, weatherCondition, schedule, staticTempC, floorId));
+  }
   return invoke('simulation/run', {
     method: 'POST',
     body: {
@@ -234,14 +250,17 @@ export function runSimulation(
 }
 
 export function getSimulationRun(id: string): Promise<SimulationRun> {
+  if (isDemoMode) return Promise.resolve(mock.mockGetSimulationRun(id));
   return invoke(`simulation/${id}`, { method: 'GET' });
 }
 
 export function getSimulationHourlyData(id: string): Promise<SimulationHourlyRow[]> {
+  if (isDemoMode) return Promise.resolve(mock.mockGetSimulationHourly(id));
   return invoke(`simulation/${id}/hourly-data`, { method: 'GET' });
 }
 
-export function listSimulations(): Promise<SimulationListItem[]> {
+export function listSimulations(floorId?: string): Promise<SimulationListItem[]> {
+  if (isDemoMode) return Promise.resolve(mock.mockListSimulations(floorId));
   return invoke('simulation/list', { method: 'GET' });
 }
 
@@ -331,7 +350,11 @@ function bucketize(
   });
 }
 
-export async function getPeopleHistory(range: DateRange): Promise<HistoryPoint[]> {
+export async function getPeopleHistory(range: DateRange, floorId?: string): Promise<HistoryPoint[]> {
+  if (isDemoMode) {
+    const rows = mock.mockPeopleRows(rangeStart(range), floorId).map((r) => ({ timestamp: r.captured_at, value: r.people_count }));
+    return bucketize(rows, range, 'max');
+  }
   const { data, error } = await supabase
     .from('occupancy_readings')
     .select('people_count, captured_at')
@@ -346,7 +369,11 @@ export async function getPeopleHistory(range: DateRange): Promise<HistoryPoint[]
   return bucketize(rows, range, 'max');
 }
 
-export async function getElectricHistory(range: DateRange): Promise<HistoryPoint[]> {
+export async function getElectricHistory(range: DateRange, floorId?: string): Promise<HistoryPoint[]> {
+  if (isDemoMode) {
+    const rows = mock.mockCalcRows(rangeStart(range), floorId).map((r) => ({ timestamp: r.calculated_at, value: r.power_kw }));
+    return bucketize(rows, range);
+  }
   const { data, error } = await supabase
     .from('ac_calculations')
     .select('power_kw, calculated_at')
@@ -360,7 +387,11 @@ export async function getElectricHistory(range: DateRange): Promise<HistoryPoint
   return bucketize(rows, range);
 }
 
-export async function getTemperatureHistory(range: DateRange): Promise<HistoryPoint[]> {
+export async function getTemperatureHistory(range: DateRange, floorId?: string): Promise<HistoryPoint[]> {
+  if (isDemoMode) {
+    const rows = mock.mockCalcRows(rangeStart(range), floorId).map((r) => ({ timestamp: r.calculated_at, value: r.temperature_c }));
+    return bucketize(rows, range);
+  }
   const { data, error } = await supabase
     .from('ac_calculations')
     .select('temperature_c, calculated_at')

@@ -1,7 +1,10 @@
-import { onMounted, onUnmounted, ref } from 'vue';
+import { onMounted, onUnmounted, ref, watch } from 'vue';
 import { supabase } from '../lib/supabaseClient';
 import { withProgress } from '../lib/progress';
+import { isDemoMode } from '../lib/mock/mode';
+import { mockCalculation, subscribeLive } from '../lib/mock/api';
 import type { AcMode } from '../lib/api';
+import { useSelectedFloor } from './useSelectedFloor';
 
 interface AcCalculationReading {
   id: string;
@@ -16,8 +19,19 @@ interface AcCalculationReading {
 // inserts a fresh ac_calculations row) without polling.
 export function useAcCalculation() {
   const latestCalculation = ref<AcCalculationReading | null>(null);
+  const { selectedFloor } = useSelectedFloor();
+  if (isDemoMode) watch(selectedFloor, (floor) => (latestCalculation.value = mockCalculation(floor) as AcCalculationReading));
 
   onMounted(async () => {
+    if (isDemoMode) {
+      latestCalculation.value = mockCalculation(selectedFloor.value) as AcCalculationReading;
+      const stop = subscribeLive((_reading, calc) => {
+        latestCalculation.value = calc as AcCalculationReading;
+      }, () => selectedFloor.value);
+      onUnmounted(stop);
+      return;
+    }
+
     const { data } = await withProgress(() =>
       supabase
         .from('ac_calculations')
