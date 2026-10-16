@@ -6,7 +6,7 @@
  * use utilities like `bg-primary`, `text-on-surface-variant`, etc. directly.
  */
 @theme {
-  --font-sans: "Inter", system-ui, sans-serif;
+  --font-sans: "Inter", "Noto Sans Thai", system-ui, sans-serif;
 
   --color-surface: #f8f9ff;
   --color-surface-dim: #ccdbf4;
@@ -17,46 +17,58 @@
   --color-surface-container-high: #dde9ff;
   --color-surface-container-highest: #d5e3fd;
   --color-on-surface: #0d1c2f;
-  --color-on-surface-variant: #404944;
+  --color-on-surface-variant: #42474e;
   --color-inverse-surface: #233144;
   --color-inverse-on-surface: #ebf1ff;
-  --color-outline: #707974;
-  --color-outline-variant: #bfc9c3;
-  --color-surface-tint: #2b6954;
+  --color-outline: #72777f;
+  --color-outline-variant: #c2c7cf;
+  --color-surface-tint: #2a5ea8;
 
-  --color-primary: #003527;
+  --color-primary: #0b4a8b;
   --color-on-primary: #ffffff;
-  --color-primary-container: #064e3b;
-  --color-on-primary-container: #80bea6;
-  --color-inverse-primary: #95d3ba;
+  --color-primary-container: #1565c0;
+  --color-on-primary-container: #d6e6ff;
+  --color-inverse-primary: #a4c9ff;
 
-  --color-secondary: #52625c;
+  --color-secondary: #4f5f73;
   --color-on-secondary: #ffffff;
-  --color-secondary-container: #d3e3dc;
-  --color-on-secondary-container: #566660;
+  --color-secondary-container: #d3e4fb;
+  --color-on-secondary-container: #3a4a5d;
 
-  --color-tertiary: #003623;
+  --color-tertiary: #00505e;
   --color-on-tertiary: #ffffff;
-  --color-tertiary-container: #004f34;
-  --color-on-tertiary-container: #31c98f;
+  --color-tertiary-container: #006a7c;
+  --color-on-tertiary-container: #a6eeff;
 
   --color-error: #ba1a1a;
   --color-on-error: #ffffff;
   --color-error-container: #ffdad6;
   --color-on-error-container: #93000a;
 
-  --color-primary-fixed: #b0f0d6;
-  --color-primary-fixed-dim: #95d3ba;
-  --color-on-primary-fixed: #002117;
-  --color-on-primary-fixed-variant: #0b513d;
-  --color-secondary-fixed: #d5e6df;
-  --color-secondary-fixed-dim: #bacac3;
-  --color-on-secondary-fixed: #101e1a;
-  --color-on-secondary-fixed-variant: #3b4a44;
-  --color-tertiary-fixed: #6ffbbe;
-  --color-tertiary-fixed-dim: #4edea3;
-  --color-on-tertiary-fixed: #002113;
-  --color-on-tertiary-fixed-variant: #005236;
+  --color-primary-fixed: #d4e3ff;
+  --color-primary-fixed-dim: #a4c9ff;
+  --color-on-primary-fixed: #001c3a;
+  --color-on-primary-fixed-variant: #0f4a85;
+  --color-secondary-fixed: #d3e4fb;
+  --color-secondary-fixed-dim: #b7c8de;
+  --color-on-secondary-fixed: #0b1d2e;
+  --color-on-secondary-fixed-variant: #38485a;
+  --color-tertiary-fixed: #a6eeff;
+  --color-tertiary-fixed-dim: #55d6f4;
+  --color-on-tertiary-fixed: #001f26;
+  --color-on-tertiary-fixed-variant: #004e5c;
+
+  --color-warning: #8a5100;
+  --color-warning-container: #ffdcbd;
+  --color-on-warning-container: #2c1600;
+  --color-success: #1b6c3a;
+
+  --shadow-card: 0 4px 20px rgba(11, 74, 139, 0.06);
+
+  --chart-1: #1565c0;
+  --chart-2: #8a94a6;
+  --chart-3: #e07a1f;
+  --chart-4: #00838f;
 
   --color-background: #f8f9ff;
   --color-on-background: #0d1c2f;
@@ -99,6 +111,31 @@
 body {
   margin: 0;
   font-family: var(--font-sans);
+}
+
+:lang(th) {
+  line-height: 1.6;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* Active nav link (sidebar and mobile bottom bar) */
+.nav-active {
+  background: var(--color-secondary-fixed);
+  color: var(--color-on-secondary-fixed);
+}
+
+.nav-active .material-symbols-outlined {
+  font-variation-settings: 'FILL' 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-pulse {
+    animation: none;
+  }
 }
 
 /* NProgress bar recolored to match the app's primary color; peg/spinner disabled via configure({ showSpinner: false }) in lib/progress.ts. */

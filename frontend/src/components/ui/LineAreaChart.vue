@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
+import { formatNumber } from '../../lib/format';
 
 export interface ChartSeries {
   key: string;
@@ -16,7 +17,7 @@ const props = withDefaults(
   defineProps<{
     data: ChartRow[];
     series: ChartSeries[];
-    mode?: 'line' | 'area';
+    mode?: 'line' | 'area' | 'bar';
     xKey?: string;
     // Formats the x-axis tick + tooltip label from a data row. Defaults to
     // the original "{hour_index}h" behavior so existing callers (Simulation,
@@ -27,8 +28,26 @@ const props = withDefaults(
     // forced to start at 0 compresses the whole visible swing into a sliver
     // at the top) — pass a value near the data's realistic minimum instead.
     yMin?: number;
+    ariaLabel?: string;
+    // Appended to tooltip values and the screen reader table (e.g. ' kW').
+    unit?: string;
+    referenceLines?: { value: number; label: string; color: string }[];
+    // Renders a visually hidden table of the data for screen readers.
+    showTable?: boolean;
+    // Whole-number axis and tooltips, for counts like people.
+    integerY?: boolean;
   }>(),
-  { mode: 'line', xKey: 'hour_index', formatX: undefined, yMin: 0 },
+  {
+    mode: 'line',
+    xKey: 'hour_index',
+    formatX: undefined,
+    yMin: 0,
+    ariaLabel: 'Chart',
+    unit: '',
+    referenceLines: () => [],
+    showTable: true,
+    integerY: false,
+  },
 );
 
 function numAt(row: ChartRow | null | undefined, key: string): number {
@@ -53,7 +72,13 @@ const n = computed(() => props.data.length);
 
 const maxY = computed(() => {
   const values = props.series.flatMap((s) => props.data.map((d) => numAt(d, s.key)));
-  const rawMax = Math.max(...values, props.yMin);
+  const refValues = props.referenceLines.map((r) => r.value);
+  const rawMax = Math.max(...values, ...refValues, props.yMin);
+  if (props.integerY) {
+    // 4 tick intervals, so a multiple of 4 keeps every tick a whole number
+    const span = Math.max(4, Math.ceil((rawMax - props.yMin) / 4) * 4);
+    return props.yMin + span;
+  }
   return rawMax + (rawMax - props.yMin) * 0.1 || props.yMin + 1;
 });
 
@@ -66,7 +91,7 @@ function yAt(v: number): number {
 }
 
 function fmtNum(value: number, digits = 1): string {
-  return Number(value).toLocaleString(undefined, { maximumFractionDigits: digits, minimumFractionDigits: 0 });
+  return formatNumber(value, props.integerY ? 0 : digits);
 }
 
 const yTicks = computed(() => {
@@ -78,13 +103,20 @@ const yTicks = computed(() => {
 });
 
 const xTicks = computed(() => {
-  const step = Math.max(24, Math.ceil(n.value / 8 / 24) * 24);
+  const step = Math.max(1, Math.ceil(n.value / 8));
   const ticks: { x: number; label: string }[] = [];
   for (let i = 0; i < n.value; i += step) {
     ticks.push({ x: xAt(i), label: xLabel(props.data[i], i) });
   }
   return ticks;
 });
+
+const barGroupW = computed(() => plotW / Math.max(n.value, 1));
+const barW = computed(() => Math.max(2, (barGroupW.value * 0.7) / Math.max(props.series.length, 1)));
+function barX(i: number, si: number): number {
+  const groupStart = padL + i * barGroupW.value + barGroupW.value * 0.15;
+  return groupStart + si * barW.value;
+}
 
 const seriesPaths = computed(() =>
   props.series.map((s) => {
@@ -97,7 +129,7 @@ const seriesPaths = computed(() =>
 const svgEl = ref<SVGSVGElement | null>(null);
 const hoverIdx = ref<number | null>(null);
 
-function handleMove(evt: MouseEvent) {
+function handleMove(evt: PointerEvent) {
   if (!svgEl.value || n.value === 0) return;
   const rect = svgEl.value.getBoundingClientRect();
   const scale = width / rect.width;
@@ -108,9 +140,31 @@ function handleMove(evt: MouseEvent) {
 function handleLeave() {
   hoverIdx.value = null;
 }
+function handleKey(evt: KeyboardEvent) {
+  if (n.value === 0) return;
+  const cur = hoverIdx.value;
+  if (evt.key === 'ArrowRight') {
+    hoverIdx.value = cur === null ? 0 : Math.min(n.value - 1, cur + 1);
+  } else if (evt.key === 'ArrowLeft') {
+    hoverIdx.value = cur === null ? n.value - 1 : Math.max(0, cur - 1);
+  } else if (evt.key === 'Home') {
+    hoverIdx.value = 0;
+  } else if (evt.key === 'End') {
+    hoverIdx.value = n.value - 1;
+  } else if (evt.key === 'Escape') {
+    hoverIdx.value = null;
+  } else {
+    return;
+  }
+  evt.preventDefault();
+}
 
 const hoverRow = computed(() => (hoverIdx.value !== null ? props.data[hoverIdx.value] : null));
-const hoverX = computed(() => (hoverIdx.value !== null ? xAt(hoverIdx.value) : 0));
+const hoverX = computed(() => {
+  if (hoverIdx.value === null) return 0;
+  if (props.mode === 'bar') return padL + (hoverIdx.value + 0.5) * barGroupW.value;
+  return xAt(hoverIdx.value);
+});
 const tooltipTopPct = computed(() => {
   if (!hoverRow.value) return 0;
   const topValue = Math.max(...props.series.map((s) => numAt(hoverRow.value, s.key)));
@@ -124,9 +178,13 @@ const tooltipTopPct = computed(() => {
       ref="svgEl"
       :viewBox="`0 0 ${width} ${height}`"
       width="100%"
-      style="display: block"
+      class="block"
       role="img"
-      aria-label="chart"
+      :aria-label="ariaLabel"
+      style="touch-action: pan-y"
+      tabindex="0"
+      @keydown="handleKey"
+      @blur="handleLeave"
     >
       <template
         v-for="tick in yTicks"
@@ -137,14 +195,14 @@ const tooltipTopPct = computed(() => {
           :y1="tick.y"
           :x2="width - padR"
           :y2="tick.y"
-          stroke="#e6e6e6"
+          stroke="#dde3ec"
           stroke-width="1"
         />
         <text
           :x="padL - 8"
           :y="tick.y + 4"
-          font-size="10"
-          fill="#666"
+          font-size="12"
+          fill="#42474e"
           text-anchor="end"
         >{{ tick.label }}</text>
       </template>
@@ -153,30 +211,71 @@ const tooltipTopPct = computed(() => {
         :key="`x-${tick.x}`"
         :x="tick.x"
         :y="height - padB + 16"
-        font-size="10"
-        fill="#666"
+        font-size="12"
+        fill="#42474e"
         text-anchor="middle"
       >{{ tick.label }}</text>
 
-      <template
-        v-for="s in seriesPaths"
-        :key="s.key"
+      <g
+        v-for="rl in referenceLines"
+        :key="rl.label"
       >
-        <polygon
-          v-if="mode === 'area'"
-          :points="s.areaPoints"
-          :fill="s.color"
-          fill-opacity="0.1"
-          stroke="none"
+        <line
+          :x1="padL"
+          :y1="yAt(rl.value)"
+          :x2="width - padR"
+          :y2="yAt(rl.value)"
+          :stroke="rl.color"
+          stroke-width="1.5"
+          stroke-dasharray="5 4"
         />
-        <polyline
-          :points="s.points"
-          fill="none"
-          :stroke="s.color"
-          stroke-width="2"
-          stroke-linejoin="round"
-          stroke-linecap="round"
-        />
+        <text
+          :x="width - padR - 4"
+          :y="yAt(rl.value) - 4"
+          font-size="12"
+          text-anchor="end"
+          :fill="rl.color"
+        >{{ rl.label }}</text>
+      </g>
+
+      <template v-if="mode === 'bar'">
+        <template
+          v-for="(s, si) in series"
+          :key="s.key"
+        >
+          <rect
+            v-for="(d, i) in data"
+            :key="i"
+            :x="barX(i, si)"
+            :y="Math.min(yAt(numAt(d, s.key)), yAt(yMin))"
+            :width="barW"
+            :height="Math.abs(yAt(yMin) - yAt(numAt(d, s.key)))"
+            :fill="s.color"
+            rx="1"
+          />
+        </template>
+      </template>
+      <template v-else>
+        <template
+          v-for="s in seriesPaths"
+          :key="s.key"
+        >
+          <polygon
+            v-if="mode === 'area'"
+            :points="s.areaPoints"
+            :fill="s.color"
+            fill-opacity="0.1"
+            stroke="none"
+          />
+          <polyline
+            :points="s.points"
+            fill="none"
+            :stroke="s.color"
+            stroke-width="2"
+            stroke-linejoin="round"
+            stroke-linecap="round"
+          />
+        </template>
       </template>
 
       <line
@@ -194,14 +293,15 @@ const tooltipTopPct = computed(() => {
         :width="plotW"
         :height="plotH"
         fill="transparent"
-        @mousemove="handleMove"
-        @mouseleave="handleLeave"
+        @pointermove="handleMove"
+        @pointerdown="handleMove"
+        @pointerleave="handleLeave"
       />
     </svg>
 
     <div
       v-if="hoverRow"
-      class="absolute bg-white border border-slate-200 rounded shadow-sm px-2 py-1 text-label-sm pointer-events-none -translate-x-1/2 -translate-y-full"
+      class="absolute bg-surface-container-lowest border border-slate-200 rounded shadow-sm px-2 py-1 text-label-sm pointer-events-none -translate-x-1/2 -translate-y-full"
       :style="{ left: `${(hoverX / width) * 100}%`, top: `${tooltipTopPct}%` }"
     >
       <div class="text-on-surface-variant">
@@ -212,11 +312,50 @@ const tooltipTopPct = computed(() => {
         :key="s.key"
         :style="{ color: s.color }"
       >
-        {{ s.label }}: {{ fmtNum(numAt(hoverRow, s.key), 2) }}
+        {{ s.label }}: {{ fmtNum(numAt(hoverRow, s.key), 2) }}{{ unit }}
       </div>
     </div>
 
-    <div class="flex gap-4 mt-3 text-label-sm text-on-surface-variant">
+    <div
+      v-if="showTable"
+      class="sr-only"
+    >
+      <table>
+        <caption>{{ ariaLabel }}</caption>
+        <thead>
+          <tr>
+            <th scope="col">
+            &nbsp;
+            </th>
+            <th
+              v-for="s in series"
+              :key="s.key"
+              scope="col"
+            >
+              {{ s.label }}
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr
+            v-for="(d, i) in data"
+            :key="i"
+          >
+            <th scope="row">
+              {{ xLabel(d, i) }}
+            </th>
+            <td
+              v-for="s in series"
+              :key="s.key"
+            >
+              {{ fmtNum(numAt(d, s.key), 2) }}{{ unit }}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="flex flex-wrap gap-x-4 gap-y-1 mt-3 text-label-sm text-on-surface-variant">
       <span
         v-for="s in series"
         :key="s.key"

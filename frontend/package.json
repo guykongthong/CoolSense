@@ -14,7 +14,8 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.112.3",
     "nprogress": "^0.2.0",
-    "vue": "^3.5.40"
+    "vue": "^3.5.40",
+    "vue-router": "^4.6.4"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

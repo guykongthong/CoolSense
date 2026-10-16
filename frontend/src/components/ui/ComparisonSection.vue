@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import Card from './Card.vue';
+import { formatBaht, formatNumber } from '../../lib/format';
 import { t } from '../../lib/i18n';
 import type { SimulationSummary } from '../../lib/api';
 
@@ -26,7 +27,7 @@ const appOverheadPct = computed(() =>
               {{ t('simulation.energyLabel') }}
             </dt>
             <dd class="text-headline-lg text-on-surface-variant">
-              {{ summary.static_v3_energy_kwh.toFixed(1) }} kWh
+              {{ formatNumber(summary.static_v3_energy_kwh, 1) }} kWh
             </dd>
           </div>
           <div class="flex justify-between items-baseline">
@@ -34,7 +35,7 @@ const appOverheadPct = computed(() =>
               {{ t('simulation.co2Label') }}
             </dt>
             <dd class="text-headline-lg text-on-surface-variant">
-              {{ summary.static_v3_co2_kg.toFixed(1) }} kg
+              {{ formatNumber(summary.static_v3_co2_kg, 1) }} kg
             </dd>
           </div>
           <div class="flex justify-between items-baseline">
@@ -42,7 +43,7 @@ const appOverheadPct = computed(() =>
               {{ t('simulation.costLabel') }}
             </dt>
             <dd class="text-headline-lg text-on-surface-variant">
-              {{ summary.static_v3_cost_baht.toFixed(0) }} baht
+              {{ formatBaht(summary.static_v3_cost_baht) }}
             </dd>
           </div>
         </dl>
@@ -58,7 +59,7 @@ const appOverheadPct = computed(() =>
               {{ t('simulation.energyLabel') }}
             </dt>
             <dd class="text-headline-lg text-primary">
-              {{ summary.coolsense_v3_energy_kwh.toFixed(1) }} kWh
+              {{ formatNumber(summary.coolsense_v3_energy_kwh, 1) }} kWh
             </dd>
           </div>
           <div class="flex justify-between items-baseline">
@@ -66,7 +67,7 @@ const appOverheadPct = computed(() =>
               {{ t('simulation.co2Label') }}
             </dt>
             <dd class="text-headline-lg text-primary">
-              {{ summary.coolsense_v3_co2_kg.toFixed(1) }} kg
+              {{ formatNumber(summary.coolsense_v3_co2_kg, 1) }} kg
             </dd>
           </div>
           <div class="flex justify-between items-baseline">
@@ -74,7 +75,7 @@ const appOverheadPct = computed(() =>
               {{ t('simulation.costLabel') }}
             </dt>
             <dd class="text-headline-lg text-primary">
-              {{ summary.coolsense_v3_cost_baht.toFixed(0) }} baht
+              {{ formatBaht(summary.coolsense_v3_cost_baht) }}
             </dd>
           </div>
         </dl>
@@ -85,7 +86,7 @@ const appOverheadPct = computed(() =>
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 text-center">
         <div>
           <div class="text-display-lg text-primary">
-            {{ summary.net_energy_saved_kwh.toFixed(1) }} kWh
+            {{ formatNumber(summary.net_energy_saved_kwh, 1) }} kWh
           </div>
           <div class="text-label-md text-on-surface-variant">
             {{ t('simulation.netEnergySaved') }}
@@ -93,7 +94,7 @@ const appOverheadPct = computed(() =>
         </div>
         <div>
           <div class="text-display-lg text-primary">
-            {{ summary.net_co2_saved_kg.toFixed(1) }} kg
+            {{ formatNumber(summary.net_co2_saved_kg, 1) }} kg
           </div>
           <div class="text-label-md text-on-surface-variant">
             {{ t('simulation.netCo2Saved') }}
@@ -101,7 +102,7 @@ const appOverheadPct = computed(() =>
         </div>
         <div>
           <div class="text-display-lg text-primary">
-            {{ summary.net_cost_saved_baht.toFixed(0) }} baht
+            {{ formatBaht(summary.net_cost_saved_baht) }}
           </div>
           <div class="text-label-md text-on-surface-variant">
             {{ t('simulation.netCostSaved') }}
@@ -111,8 +112,8 @@ const appOverheadPct = computed(() =>
       <p class="text-label-sm text-on-surface-variant mt-4 pt-4 border-t border-dashed border-slate-200">
         {{
           t('simulation.appEnergyFootnote', {
-            kwh: summary.app_energy_kwh.toFixed(3),
-            pct: appOverheadPct.toFixed(2),
+            kwh: formatNumber(summary.app_energy_kwh, 3),
+            pct: formatNumber(appOverheadPct, 2),
           })
         }}
       </p>

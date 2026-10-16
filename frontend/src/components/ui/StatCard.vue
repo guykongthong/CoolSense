@@ -12,7 +12,7 @@ withDefaults(
 
 <template>
   <div
-    class="bg-white rounded-xl border border-slate-200 shadow-[0_4px_20px_rgba(6,78,59,0.05)] p-6 flex flex-col justify-between min-h-48"
+    class="bg-surface-container-lowest rounded-xl border border-slate-200 shadow-card p-6 flex flex-col justify-between min-h-48"
   >
     <div class="flex justify-between items-start gap-4">
       <div>

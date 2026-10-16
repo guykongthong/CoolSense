@@ -3,7 +3,7 @@ withDefaults(defineProps<{ title?: string }>(), { title: undefined });
 </script>
 
 <template>
-  <div class="bg-white rounded-xl border border-slate-200 shadow-[0_4px_20px_rgba(6,78,59,0.05)] p-6 flex flex-col">
+  <div class="bg-surface-container-lowest rounded-xl border border-slate-200 shadow-card p-6 flex flex-col">
     <div
       v-if="title || $slots.actions"
       class="flex justify-between items-center mb-6 pb-4 border-b border-dashed border-slate-200"
