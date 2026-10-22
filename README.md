@@ -2,7 +2,7 @@
 
 A software-only system that cuts AC energy waste in hotels, offices, and malls by adjusting temperature and fan speed to real occupancy, instead of running full blast 24/7 regardless of how many people are actually in the room.
 
-Built in a 2-day hackathon. 🏆 **1st place, K-CAMT'26 Hackathon (Net-Zero Carbon track).** I led the 5-person team.
+Built in a 2-day hackathon. 🏆 **1st place, K-CAMT'26 Hackathon (Net-Zero Carbon track).** I led the 5-person team. We are now competing with it at the New Gen Energy Research Showcase, scaling it up with multi-room support, new features, and hardware integration.
 
 **Live demo:** https://k-camt-hackathon.vercel.app
 
