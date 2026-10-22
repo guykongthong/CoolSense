@@ -30,7 +30,7 @@ Air conditioning in public/shared spaces — hotel lobbies, offices, malls — i
 
 CoolSense tracks real occupancy (headcount) in a room and continuously recalculates the exact cooling capacity that room actually needs, instead of relying on one fixed setpoint. Occupancy can be entered manually or estimated live from a webcam feed using Gemini vision. The system combines occupancy, room size, and live outside weather to recommend a temperature, fan speed, and power draw grounded in real HVAC physics (BTU/hr load, SEER efficiency) — not arbitrary constants.
 
-A built-in simulator generates a realistic week of hotel occupancy data and compares CoolSense against an always-on baseline, so the energy/CO₂/cost savings can be demonstrated without needing a live building to test on.
+A built-in simulator generates a realistic week of occupancy data (a weekday office/hotel pattern) and compares CoolSense against an always-on baseline, so the energy/CO₂/cost savings can be demonstrated without needing a live building to test on.
 
 ## How It Works
 
@@ -110,7 +110,7 @@ The interface is available in English and Thai (toggle in the header) and uses a
 
 ## Impact
 
-Example 168-hour (1-week) simulated comparison for a mid-size hotel room:
+Example 168-hour (1-week) simulated comparison for a mid-size room (the hackathon demo used a library):
 
 | | Baseline (always-on) | CoolSense | Savings |
 |---|---|---|---|
